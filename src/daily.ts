@@ -1,7 +1,7 @@
-// src/daily.ts
 import OpenAI from "openai";
 import type { BotState, DailyWord } from "./state";
 import { saveState, todayString } from "./state";
+import type { Env } from "./types";
 
 const DAILY_TOPIC_PROMPT = `Ты — помощник в чате взаимного изучения греческого и русского языков.
 Придумай интересную тему для обсуждения на сегодня (1 короткое предложение на греческом (в скобках с переводом на русский), до 100 символов).
@@ -22,6 +22,7 @@ const DAILY_TOPIC_PROMPT = `Ты — помощник в чате взаимно
 export async function generateDailyTopic(
     ai: OpenAI,
     model: string,
+    env: Env,
     state: BotState,
 ): Promise<BotState> {
     const today = todayString();
@@ -51,7 +52,7 @@ export async function generateDailyTopic(
             currentWord: parsed.word,
             wordRevealed: false,
         };
-        await saveState(newState);
+        await saveState(env, newState);
         console.log(
             `[daily] Новая тема: ${parsed.topic} | слово: ${parsed.word.greek}`,
         );

@@ -1,10 +1,4 @@
-// src/state.ts
-import { readFile, writeFile, mkdir } from "fs/promises";
-import { existsSync } from "fs";
-import path from "path";
-
-const DATA_DIR = path.resolve(process.cwd(), "data");
-const STATE_FILE = path.join(DATA_DIR, "state.json");
+import type { Env } from "./types";
 
 export interface DailyWord {
     greek: string;
@@ -13,7 +7,7 @@ export interface DailyWord {
 }
 
 export interface BotState {
-    lastTopicDate: string | null; // "2026-11-12"
+    lastTopicDate: string | null;
     currentTopic: string | null;
     currentWord: DailyWord | null;
     wordRevealed: boolean;
@@ -26,30 +20,27 @@ const DEFAULT_STATE: BotState = {
     wordRevealed: false,
 };
 
-export async function loadState(): Promise<BotState> {
+const KV_KEY = "bot_state";
+
+export async function loadState(env: Env): Promise<BotState> {
     try {
-        if (!existsSync(STATE_FILE)) {
-            await mkdir(DATA_DIR, { recursive: true });
-            await writeFile(STATE_FILE, JSON.stringify(DEFAULT_STATE, null, 2));
-            return { ...DEFAULT_STATE };
-        }
-        const raw = await readFile(STATE_FILE, "utf-8");
+        const raw = await env.GREEK_KV.get(KV_KEY);
+        if (!raw) return { ...DEFAULT_STATE };
         return { ...DEFAULT_STATE, ...JSON.parse(raw) };
     } catch (err) {
-        console.error("Не удалось загрузить state:", err);
+        console.error("Не удалось загрузить state из KV:", err);
         return { ...DEFAULT_STATE };
     }
 }
 
-export async function saveState(state: BotState): Promise<void> {
+export async function saveState(env: Env, state: BotState): Promise<void> {
     try {
-        await mkdir(DATA_DIR, { recursive: true });
-        await writeFile(STATE_FILE, JSON.stringify(state, null, 2));
+        await env.GREEK_KV.put(KV_KEY, JSON.stringify(state));
     } catch (err) {
-        console.error("Не удалось сохранить state:", err);
+        console.error("Не удалось сохранить state в KV:", err);
     }
 }
 
 export function todayString(): string {
-    return new Date().toISOString().slice(0, 10); // "YYYY-MM-DD" (UTC)
+    return new Date().toISOString().slice(0, 10);
 }

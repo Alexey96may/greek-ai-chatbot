@@ -1,0 +1,13 @@
+name = "tg-greek-openai-bot"
+main = "src/index.ts"
+compatibility_date = "2025-01-01"
+compatibility_flags = ["nodejs_compat"]
+
+# Привязка KV для хранения состояния
+[[kv_namespaces]]
+binding = "GREEK_KV"
+id = "ТВОЙ_ID_KV_NAMESPACE" # Создай namespace в дашборде Cloudflare и вставь ID
+
+# Cron Trigger: запуск каждый день в 9:00 UTC
+[triggers]
+crons = ["0 9 * * *"]
