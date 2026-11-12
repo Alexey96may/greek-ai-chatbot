@@ -1,0 +1,17 @@
+node_modules/
+deploy/
+dist/
+.env
+todo*
+
+.env
+.dev.vars
+*.local
+
+data/
+*.log
+
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/

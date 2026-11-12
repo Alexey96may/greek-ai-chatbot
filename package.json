@@ -1,0 +1,19 @@
+{
+    "name": "tg_greek_openai_bot",
+    "version": "1.0.0",
+    "description": "",
+    "main": "index.js",
+    "scripts": {
+        "dev": "tsx watch src/index.ts"
+    },
+    "dependencies": {
+        "dotenv": "^18.0.10",
+        "grammy": "^1.46.0",
+        "openai": "^7.55.0"
+    },
+    "devDependencies": {
+        "@types/node": "^26.6.6",
+        "tsx": "^4.23.15",
+        "typescript": "^7.0.2"
+    }
+}
