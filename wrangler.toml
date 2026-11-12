@@ -6,7 +6,7 @@ compatibility_flags = ["nodejs_compat"]
 # Привязка KV для хранения состояния
 [[kv_namespaces]]
 binding = "GREEK_KV"
-id = "ТВОЙ_ID_KV_NAMESPACE" # Создай namespace в дашборде Cloudflare и вставь ID
+id = "018977951b09462ab4e4003994f7f49c" # Создай namespace в дашборде Cloudflare и вставь ID
 
 # Cron Trigger: запуск каждый день в 9:00 UTC
 [triggers]
