@@ -29,8 +29,8 @@ A Telegram bot for a multilingual community practicing Greek and Russian. The bo
 ### 1. Clone and install
 
 ```bash
-git clone https://github.com/YOUR_USERNAME/greek-practice-bot.git
-cd greek-practice-bot
+git clone https://github.com/Alexey96may/greek-ai-chatbot.git
+cd greek-ai-chatbot
 npm install
 ```
 
