@@ -8,11 +8,13 @@ Deployed on **Cloudflare Workers** with **Workers KV** for storage and **Cron Tr
 
 - **Conversational AI** — replies like a native speaker would, without saying "you made a mistake".
 - **Two target languages** — Greek and Russian. The bot detects which language the user is learning and responds accordingly.
+- **Voice messages** — transcribes voice messages via Groq Whisper and replies with voice (ElevenLabs TTS) plus text caption.
 - **Smart silence** — does not interrupt conversations between two people (replies to human messages are ignored).
 - **Direct mentions** — replies instantly when mentioned (`@bot`) or when someone replies to the bot's message.
 - **Immediate replies** — responds right away to general messages in the group.
-- **Daily topic & word** — once a day (via Cron Trigger), generates a discussion topic and a related Greek word with translation and example.
+- **Daily topic & word** — once a day (via Cron Trigger), generates a discussion topic and a related Greek word with translation and example. Avoids repeating recent topics/words (last 7).
 - **Single-chat mode** — works only in one allowed chat to save API tokens.
+- **Owner private chat** — the bot also responds in DM to the owner (`OWNER_ID`).
 - **AI fallback** — tries Gemini first, falls back to Groq if Gemini is unavailable or rate-limited.
 
 ## Tech Stack
@@ -22,7 +24,8 @@ Deployed on **Cloudflare Workers** with **Workers KV** for storage and **Cron Tr
 - **Bot framework**: [grammY](https://grammy.dev/)
 - **AI providers**:
     - [Google Gemini](https://ai.google.dev/) (primary, free tier)
-    - [Groq](https://groq.com/) (fallback, free tier)
+    - [Groq](https://groq.com/) (fallback, free tier; also used for Whisper speech-to-text)
+- **Text-to-Speech**: [ElevenLabs](https://elevenlabs.io/) (voice "George", multilingual v2)
 - **Storage**: [Cloudflare Workers KV](https://developers.cloudflare.com/kv/)
 - **Scheduling**: [Cloudflare Cron Triggers](https://developers.cloudflare.com/workers/configuration/cron-triggers/)
 - **Deploy tool**: [Wrangler](https://developers.cloudflare.com/workers/wrangler/)
@@ -65,8 +68,10 @@ id = "YOUR_KV_ID"
 ```bash
 npx wrangler secret put BOT_TOKEN
 npx wrangler secret put GEMINI_API_KEY
-npx wrangler secret put GROQ_API_KEY # optional
+npx wrangler secret put GROQ_API_KEY        # optional (fallback + voice transcription)
+npx wrangler secret put ELEVENLABS_API_KEY  # optional (voice replies)
 npx wrangler secret put ALLOWED_CHAT_ID
+npx wrangler secret put OWNER_ID            # optional (private chat for owner)
 ```
 
 ### 5. Configure the bot in BotFather

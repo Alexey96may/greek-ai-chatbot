@@ -1,5 +1,5 @@
 // src/index.ts
-import { Bot, Context, webhookCallback } from "grammy";
+import { Bot, Context, webhookCallback, InputFile } from "grammy";
 import OpenAI from "openai";
 import { loadState } from "./state";
 import { generateDailyTopic, formatDailyMessage } from "./daily";
@@ -40,6 +40,8 @@ const COMPANION_SYSTEM_PROMPT = `Ты — дружелюбный участни�
 6. Если человек явно что-то спросил — ответь на вопрос.
 7. Тон дружелюбный, ненавязчивый. Отвечай коротко (1–3 предложения).
 8. Не переводи всё подряд — только если человек явно просит или смешал языки.
+9. Если пользователь просит сгенерировать изображение, видео или другой медиафайл — 
+ответь коротко, что ты не умеешь этого делать, и предложи продолжить беседу.
 
 ПРИМЕРЫ ТОГО, ЧЕГО НЕЛЬЗЯ ДЕЛАТЬ:
 - НЕ пиши "так правильнее", "так звучит естественнее", "вот так будет по-гречески".
@@ -308,10 +310,35 @@ function setupHandlers(bot: Bot, env: Env) {
             const answer = await askAI(env, transcribedText);
 
             if (answer) {
+                const audioBytes = await textToSpeech(env, answer);
+                if (audioBytes) {
+                    try {
+                        const caption =
+                            answer.length > 1000
+                                ? answer.slice(0, 997) + "..."
+                                : answer;
+                        await ctx.replyWithVoice(
+                            new InputFile(audioBytes, "reply.ogg"),
+                            {
+                                caption,
+                                reply_parameters: { message_id: messageId },
+                            },
+                        );
+                        console.log(`[${chatId}] ответил голосом + текст`);
+                        return;
+                    } catch (ttsErr) {
+                        console.error(
+                            `[${chatId}] не удалось отправить голосовое:`,
+                            ttsErr,
+                        );
+                    }
+                }
+
+                // Fallback — текстом (или для группы)
                 await ctx.reply(answer, {
                     reply_parameters: { message_id: messageId },
                 });
-                console.log(`[${chatId}] ответил на голосовое`);
+                console.log(`[${chatId}] ответил на голосовое (текстом)`);
             }
         } catch (err) {
             console.error(`[${chatId}] ошибка обработки голосового:`, err);
@@ -334,6 +361,54 @@ async function getBot(env: Env): Promise<Bot> {
 
     console.log(`🤖 Бот инициализирован как @${botUsername}`);
     return bot;
+}
+
+// ============================================================
+// TTS: ElevenLabs (George)
+// ============================================================
+const ELEVENLABS_VOICE_ID = "JBFqnCBsd6RMkjVDRZzb"; // George
+
+async function textToSpeech(
+    env: Env,
+    text: string,
+): Promise<Uint8Array | null> {
+    if (!env.ELEVENLABS_API_KEY) {
+        console.log("[TTS] ELEVENLABS_API_KEY не настроен");
+        return null;
+    }
+
+    try {
+        const response = await fetch(
+            `https://api.elevenlabs.io/v1/text-to-speech/${ELEVENLABS_VOICE_ID}?output_format=opus_48000_64`,
+            {
+                method: "POST",
+                headers: {
+                    "xi-api-key": env.ELEVENLABS_API_KEY,
+                    "Content-Type": "application/json",
+                },
+                body: JSON.stringify({
+                    text,
+                    model_id: "eleven_multilingual_v2",
+                    voice_settings: {
+                        stability: 0.5,
+                        similarity_boost: 0.75,
+                    },
+                }),
+            },
+        );
+
+        if (!response.ok) {
+            const err = await response.text();
+            console.error(`[TTS] ElevenLabs error: ${response.status} ${err}`);
+            return null;
+        }
+
+        const buffer = await response.arrayBuffer();
+        return new Uint8Array(buffer);
+    } catch (err) {
+        console.error("[TTS] Ошибка:", err);
+        return null;
+    }
 }
 
 // ============================================================
