@@ -11,6 +11,8 @@ export interface BotState {
     currentTopic: string | null;
     currentWord: DailyWord | null;
     wordRevealed: boolean;
+    recentTopics: string[];
+    recentWords: string[];
 }
 
 const DEFAULT_STATE: BotState = {
@@ -18,6 +20,8 @@ const DEFAULT_STATE: BotState = {
     currentTopic: null,
     currentWord: null,
     wordRevealed: false,
+    recentTopics: [],
+    recentWords: [],
 };
 
 const KV_KEY = "bot_state";
