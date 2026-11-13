@@ -56,6 +56,7 @@ async function askAI(
     env: Env,
     text: string,
     context?: string,
+    userName?: string,
 ): Promise<string> {
     const providers: Array<{ name: string; client: OpenAI; model: string }> =
         [];
@@ -87,9 +88,11 @@ async function askAI(
 
     for (const p of providers) {
         try {
-            const userContent = context
-                ? `[Предыдущее сообщение, на которое отвечает пользователь]: "${context}"\n\n[Новое сообщение пользователя]: ${text}`
-                : text;
+            const parts: string[] = [];
+            if (userName) parts.push(`[Пишет: ${userName}]`);
+            if (context) parts.push(`[Предыдущее сообщение]: "${context}"`);
+            parts.push(`[Сообщение]: ${text}`);
+            const userContent = parts.join("\n");
 
             const res = await p.client.chat.completions.create({
                 model: p.model,
@@ -125,9 +128,21 @@ function isAllowedChat(ctx: Context, env: Env): boolean {
     return ctx.chat?.id === Number(env.ALLOWED_CHAT_ID);
 }
 
+function isOwnerPrivate(ctx: Context, env: Env): boolean {
+    return (
+        ctx.chat?.type === "private" &&
+        Boolean(env.OWNER_ID) &&
+        ctx.chat.id === Number(env.OWNER_ID)
+    );
+}
+
+function isAllowedContext(ctx: Context, env: Env): boolean {
+    return isAllowedChat(ctx, env) || isOwnerPrivate(ctx, env);
+}
+
 function setupHandlers(bot: Bot, env: Env) {
     bot.command("start", (ctx) => {
-        if (!isAllowedChat(ctx, env)) return;
+        if (!isAllowedContext(ctx, env)) return;
         return ctx.reply(
             "Γεια σου! 👋\n\n" +
                 "Я — собеседник для практики греческого и русского. Просто общайся в чате.\n" +
@@ -136,7 +151,7 @@ function setupHandlers(bot: Bot, env: Env) {
     });
 
     bot.command("help", (ctx) => {
-        if (!isAllowedChat(ctx, env)) return;
+        if (!isAllowedContext(ctx, env)) return;
         return ctx.reply(
             "Как я работаю:\n" +
                 "• Отвечаю на сообщения в этой группе.\n" +
@@ -146,7 +161,7 @@ function setupHandlers(bot: Bot, env: Env) {
     });
 
     bot.command("word", async (ctx) => {
-        if (!isAllowedChat(ctx, env)) return;
+        if (!isAllowedContext(ctx, env)) return;
         const state = await loadState(env);
         if (!state.currentWord)
             return ctx.reply("Слово дня ещё не сгенерировано.");
@@ -160,7 +175,7 @@ function setupHandlers(bot: Bot, env: Env) {
     });
 
     bot.command("topic", async (ctx) => {
-        if (!isAllowedChat(ctx, env)) return;
+        if (!isAllowedContext(ctx, env)) return;
         const state = await loadState(env);
         if (!state.currentTopic)
             return ctx.reply("Тема дня ещё не сгенерирована.");
@@ -170,7 +185,7 @@ function setupHandlers(bot: Bot, env: Env) {
     });
 
     bot.on("message:text", async (ctx) => {
-        if (!isAllowedChat(ctx, env)) return;
+        if (!isAllowedContext(ctx, env)) return;
 
         const text = ctx.message.text;
         if (text.startsWith("/")) return;
@@ -208,7 +223,9 @@ function setupHandlers(bot: Bot, env: Env) {
 
             const contextText = ctx.message.reply_to_message?.text;
 
-            const answer = await askAI(env, cleanText, contextText);
+            const userName = ctx.message.from?.first_name;
+            const answer = await askAI(env, cleanText, contextText, userName);
+
             if (answer) {
                 await ctx.reply(answer, {
                     reply_parameters: { message_id: messageId },
@@ -217,6 +234,88 @@ function setupHandlers(bot: Bot, env: Env) {
             }
         } catch (err) {
             console.error(`[${chatId}] ошибка при ответе:`, err);
+        }
+    });
+
+    // Добавь этот обработчик в setupHandlers
+    bot.on("message:voice", async (ctx) => {
+        // 1. Проверяем чат и наличие ключа Groq
+        if (!isAllowedContext(ctx, env)) return;
+
+        if (ctx.message.from?.is_bot) return;
+
+        // ГЛАВНОЕ УСЛОВИЕ: если нет ключа Groq — молчим, не падаем
+        if (!env.GROQ_API_KEY) {
+            console.log(
+                `[${ctx.chat.id}] голосовое получено, но GROQ_API_KEY не настроен`,
+            );
+            return;
+        }
+
+        const chatId = ctx.chat.id;
+        const messageId = ctx.message.message_id;
+
+        try {
+            // 2. Получаем файл из Telegram
+            const file = await ctx.api.getFile(ctx.message.voice.file_id);
+            if (!file.file_path) {
+                throw new Error("Не удалось получить путь к файлу");
+            }
+
+            // 3. Скачиваем файл
+            const fileUrl = `https://api.telegram.org/file/bot${env.BOT_TOKEN}/${file.file_path}`;
+            const audioResponse = await fetch(fileUrl);
+            const audioBlob = await audioResponse.blob();
+
+            // 4. Отправляем в Groq Whisper
+            const formData = new FormData();
+            formData.append("file", audioBlob, "voice.ogg");
+            formData.append("model", "whisper-large-v3-turbo");
+            // Можно указать язык, если хочешь принудительно, но лучше дать модели определить
+            // formData.append("language", "el"); // или "ru"
+
+            const groqResponse = await fetch(
+                "https://api.groq.com/openai/v1/audio/transcriptions",
+                {
+                    method: "POST",
+                    headers: {
+                        Authorization: `Bearer ${env.GROQ_API_KEY}`,
+                    },
+                    body: formData,
+                },
+            );
+
+            if (!groqResponse.ok) {
+                const errText = await groqResponse.text();
+                throw new Error(
+                    `Groq API error: ${groqResponse.status} ${errText}`,
+                );
+            }
+
+            const transcription = (await groqResponse.json()) as {
+                text?: string;
+            };
+            const transcribedText = transcription.text?.trim();
+
+            if (!transcribedText) {
+                console.log(`[${chatId}] не удалось распознать речь`);
+                return;
+            }
+
+            console.log(`[${chatId}] распознано: ${transcribedText}`);
+
+            // 5. Передаём текст в твой существующий AI для ответа
+            const answer = await askAI(env, transcribedText);
+
+            if (answer) {
+                await ctx.reply(answer, {
+                    reply_parameters: { message_id: messageId },
+                });
+                console.log(`[${chatId}] ответил на голосовое`);
+            }
+        } catch (err) {
+            console.error(`[${chatId}] ошибка обработки голосового:`, err);
+            // Не отвечаем пользователю с ошибкой, просто логируем
         }
     });
 }
