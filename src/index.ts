@@ -160,11 +160,19 @@ function isAllowedContext(ctx: Context, env: Env): boolean {
 
 function setupHandlers(bot: Bot, env: Env) {
     bot.command("start", (ctx) => {
-        if (!isAllowedContext(ctx, env)) return;
+        if (isAllowedContext(ctx, env)) {
+            return ctx.reply(
+                "Γεια σου! 👋\n\n" +
+                    "Я — собеседник для практики греческого и русского. Просто общайся в чате.\n" +
+                    "Команды:\n/help — помощь\n/word — слово дня\n/topic — тема дня",
+            );
+        }
+
         return ctx.reply(
             "Γεια σου! 👋\n\n" +
-                "Я — собеседник для практики греческого и русского. Просто общайся в чате.\n" +
-                "Команды:\n/help — помощь\n/word — слово дня\n/topic — тема дня",
+                "Я работаю только в одной группе — там, где практикуют греческий и русский.\n\n" +
+                "Вот ссылка: https://t.me/elenikaglossa\n\n" +
+                "Зайди туда — и я с радостью пообщаюсь с тобой! 🇬🇷🇷🇺",
         );
     });
 
