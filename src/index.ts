@@ -47,6 +47,10 @@ const COMPANION_SYSTEM_PROMPT = `Ты — дружелюбный участни�
 сам её касается — подхвати.
 11. Если есть [Слово дня: ...] — можешь использовать его в ответе, если это звучит
 естественно. Не вставляй его насильно.
+12. Если в system-промпте указано "Сейчас с тобой говорит: Имя" — используй это имя
+в ответе, если это звучит естественно (например, при приветствии, вопросе или
+эмоциональной реакции). Не вставляй имя в каждый ответ, но и не игнорируй его
+полностью — хотя бы иногда обращайся по имени.
 
 ПРИМЕРЫ ТОГО, ЧЕГО НЕЛЬЗЯ ДЕЛАТЬ:
 - НЕ пиши "так правильнее", "так звучит естественнее", "вот так будет по-гречески".
@@ -95,10 +99,13 @@ async function askAI(
 
     if (providers.length === 0) throw new Error("Нет AI-провайдеров");
 
+    const systemPrompt = userName
+        ? `${COMPANION_SYSTEM_PROMPT}\n\nСейчас с тобой говорит: ${userName}.`
+        : COMPANION_SYSTEM_PROMPT;
+
     for (const p of providers) {
         try {
             const parts: string[] = [];
-            if (userName) parts.push(`[Пишет: ${userName}]`);
             if (topic) parts.push(`[Тема дня в чате: ${topic}]`);
             if (word) parts.push(`[Слово дня: ${word}]`);
             if (context) parts.push(`[Предыдущее сообщение]: "${context}"`);
@@ -108,7 +115,7 @@ async function askAI(
             const res = await p.client.chat.completions.create({
                 model: p.model,
                 messages: [
-                    { role: "system", content: COMPANION_SYSTEM_PROMPT },
+                    { role: "system", content: systemPrompt },
                     { role: "user", content: userContent },
                 ],
                 max_tokens: 300,
@@ -248,7 +255,8 @@ function setupHandlers(bot: Bot, env: Env) {
 
             const contextText = ctx.message.reply_to_message?.text;
             const state = await loadState(env);
-            const userName = ctx.message.from?.first_name;
+            const rawName = ctx.message.from?.first_name;
+            const userName = isReadableName(rawName) ? rawName : undefined;
 
             const answer = await askAI(
                 env,
@@ -339,11 +347,15 @@ function setupHandlers(bot: Bot, env: Env) {
 
             // 5. Передаём текст в твой существующий AI для ответа
             const state = await loadState(env);
+
+            const rawName = ctx.message.from?.first_name;
+            const userName = isReadableName(rawName) ? rawName : undefined;
+
             const answer = await askAI(
                 env,
                 transcribedText,
                 undefined, // context (no reply)
-                ctx.message.from?.first_name,
+                userName,
                 state.currentTopic,
                 state.currentWord?.greek,
             );
@@ -448,6 +460,12 @@ async function textToSpeech(
         console.error("[TTS] Ошибка:", err);
         return null;
     }
+}
+
+function isReadableName(name?: string): boolean {
+    if (!name) return false;
+    // Только буквы (любой алфавит), пробелы и дефисы. Минимум 2 символа.
+    return /^[\p{L}\s-]{2,30}$/u.test(name);
 }
 
 // ============================================================
