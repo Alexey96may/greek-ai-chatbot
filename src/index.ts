@@ -3,6 +3,7 @@ import { Bot, Context, webhookCallback, InputFile } from "grammy";
 import OpenAI from "openai";
 import { loadState } from "./state";
 import { generateDailyTopic, formatDailyMessage } from "./daily";
+
 import type { Env } from "./types";
 
 // Кэш в рамках одного изолята
@@ -51,6 +52,12 @@ const COMPANION_SYSTEM_PROMPT = `Ты — дружелюбный участни�
 в ответе, если это звучит естественно (например, при приветствии, вопросе или
 эмоциональной реакции). Не вставляй имя в каждый ответ, но и не игнорируй его
 полностью — хотя бы иногда обращайся по имени.
+13. Если в сообщении есть [Пользователь отправил стикер с эмодзи: ...] —
+ответь так, как ответил бы живой человек на этот стикер. Учитывай эмодзи
+(😂 — смех, 😢 — грусть, ❤️ — любовь и т.д.). Можешь пошутить, поддержать,
+спросить, что случилось. Не описывай стикер словами — просто реагируй.
+Если уместно — мягко свяжи реакцию с темой дня или словом дня.
+Не навязывай связь насильно — только если это звучит естественно.
 
 ПРИМЕРЫ ТОГО, ЧЕГО НЕЛЬЗЯ ДЕЛАТЬ:
 - НЕ пиши "так правильнее", "так звучит естественнее", "вот так будет по-гречески".
@@ -222,6 +229,25 @@ function setupHandlers(bot: Bot, env: Env) {
         await ctx.reply(`📌 <b>Тема дня:</b> ${state.currentTopic}`, {
             parse_mode: "HTML",
         });
+    });
+
+    // ============================================================
+    // Реакция на стикеры
+    // ============================================================
+    // Обычные стикеры
+    bot.on("message:sticker", (ctx) => handleSticker(ctx, env));
+
+    // Видео-стикеры
+    bot.on("message:video", async (ctx) => {
+        if (ctx.message.video && "sticker" in ctx.message) {
+            await handleSticker(ctx, env);
+        }
+    });
+
+    // Анимированные стикеры (.tgs)
+    bot.on("message:animation", async (ctx) => {
+        // У animation нет emoji, но если это стикер — он придёт как message:sticker
+        // Здесь можно обрабатывать GIF, но для стикеров это не нужно
     });
 
     bot.on("message:text", async (ctx) => {
@@ -451,6 +477,7 @@ async function textToSpeech(
                     voice_settings: {
                         stability: 0.5,
                         similarity_boost: 0.75,
+                        speed: 0.9,
                     },
                 }),
             },
@@ -474,6 +501,47 @@ function isReadableName(name?: string): boolean {
     if (!name) return false;
     // Только буквы (любой алфавит), пробелы и дефисы. Минимум 2 символа.
     return /^[\p{L}\s-]{2,30}$/u.test(name);
+}
+
+// ============================================================
+// Реакция на стикеры (обычные, анимированные, видео)
+// ============================================================
+async function handleSticker(ctx: Context, env: Env) {
+    if (!isAllowedContext(ctx, env)) return;
+    if (ctx.message?.from?.is_bot) return;
+
+    const sticker = ctx.message?.sticker;
+    if (!sticker) return;
+
+    const emoji = sticker.emoji ?? "🙂"; // fallback, если эмодзи нет
+    const chatId = ctx.chat!.id;
+    const messageId = ctx.message!.message_id;
+
+    try {
+        const state = await loadState(env);
+        const rawName = ctx.message?.from?.first_name;
+        const userName = isReadableName(rawName) ? rawName : undefined;
+
+        const stickerText = `[Пользователь отправил стикер с эмодзи: ${emoji}]`;
+
+        const answer = await askAI(
+            env,
+            stickerText,
+            undefined,
+            userName,
+            state.currentTopic,
+            state.currentWord?.greek,
+        );
+
+        if (answer) {
+            await ctx.reply(answer, {
+                reply_parameters: { message_id: messageId },
+            });
+            console.log(`[${chatId}] ответил на стикер ${emoji}`);
+        }
+    } catch (err) {
+        console.error(`[${chatId}] ошибка при ответе на стикер:`, err);
+    }
 }
 
 // ============================================================
