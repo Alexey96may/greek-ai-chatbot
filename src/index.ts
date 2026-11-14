@@ -42,6 +42,11 @@ const COMPANION_SYSTEM_PROMPT = `Ты — дружелюбный участни�
 8. Не переводи всё подряд — только если человек явно просит или смешал языки.
 9. Если пользователь просит сгенерировать изображение, видео или другой медиафайл — 
 ответь коротко, что ты не умеешь этого делать, и предложи продолжить беседу.
+10. Если в сообщении есть [Тема дня в чате: ...] — можешь мягко поддерживать беседу
+в этом направлении, если это уместно. Не навязывай тему, но если человек
+сам её касается — подхвати.
+11. Если есть [Слово дня: ...] — можешь использовать его в ответе, если это звучит
+естественно. Не вставляй его насильно.
 
 ПРИМЕРЫ ТОГО, ЧЕГО НЕЛЬЗЯ ДЕЛАТЬ:
 - НЕ пиши "так правильнее", "так звучит естественнее", "вот так будет по-гречески".
@@ -59,6 +64,8 @@ async function askAI(
     text: string,
     context?: string,
     userName?: string,
+    topic?: string | null,
+    word?: string | null,
 ): Promise<string> {
     const providers: Array<{ name: string; client: OpenAI; model: string }> =
         [];
@@ -92,6 +99,8 @@ async function askAI(
         try {
             const parts: string[] = [];
             if (userName) parts.push(`[Пишет: ${userName}]`);
+            if (topic) parts.push(`[Тема дня в чате: ${topic}]`);
+            if (word) parts.push(`[Слово дня: ${word}]`);
             if (context) parts.push(`[Предыдущее сообщение]: "${context}"`);
             parts.push(`[Сообщение]: ${text}`);
             const userContent = parts.join("\n");
@@ -238,9 +247,17 @@ function setupHandlers(bot: Bot, env: Env) {
                 : text;
 
             const contextText = ctx.message.reply_to_message?.text;
-
+            const state = await loadState(env);
             const userName = ctx.message.from?.first_name;
-            const answer = await askAI(env, cleanText, contextText, userName);
+
+            const answer = await askAI(
+                env,
+                cleanText,
+                contextText,
+                userName,
+                state.currentTopic,
+                state.currentWord?.greek,
+            );
 
             if (answer) {
                 await ctx.reply(answer, {
@@ -321,7 +338,15 @@ function setupHandlers(bot: Bot, env: Env) {
             console.log(`[${chatId}] распознано: ${transcribedText}`);
 
             // 5. Передаём текст в твой существующий AI для ответа
-            const answer = await askAI(env, transcribedText);
+            const state = await loadState(env);
+            const answer = await askAI(
+                env,
+                transcribedText,
+                undefined, // context (no reply)
+                ctx.message.from?.first_name,
+                state.currentTopic,
+                state.currentWord?.greek,
+            );
 
             if (answer) {
                 const audioBytes = await textToSpeech(env, answer);
