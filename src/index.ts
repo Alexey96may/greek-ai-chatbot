@@ -7,6 +7,8 @@ import {
 } from "./helpers/history";
 import { isReadableName } from "./helpers/names";
 import { arrayBufferToBase64 } from "./helpers/base64";
+import { isAllowedContext } from "./helpers/context";
+import { notifyOwner } from "./helpers/notify";
 
 import { Bot, Context, webhookCallback, InputFile } from "grammy";
 import OpenAI from "openai";
@@ -125,25 +127,6 @@ async function askAI(
     }
 
     throw new Error("Все AI-провайдеры недоступны");
-}
-
-// ============================================================
-// Настройка бота и обработчиков
-// ============================================================
-function isAllowedChat(ctx: Context, env: Env): boolean {
-    return ctx.chat?.id === Number(env.ALLOWED_CHAT_ID);
-}
-
-function isOwnerPrivate(ctx: Context, env: Env): boolean {
-    return (
-        ctx.chat?.type === "private" &&
-        Boolean(env.OWNER_ID) &&
-        ctx.chat.id === Number(env.OWNER_ID)
-    );
-}
-
-function isAllowedContext(ctx: Context, env: Env): boolean {
-    return isAllowedChat(ctx, env) || isOwnerPrivate(ctx, env);
 }
 
 function setupHandlers(bot: Bot, env: Env) {
@@ -526,39 +509,6 @@ async function getBot(env: Env): Promise<Bot> {
 
     console.log(`🤖 Бот инициализирован как @${botUsername}`);
     return bot;
-}
-
-// ============================================================
-// Error notifications for the owner (with anti-spam)
-// ============================================================
-const lastErrorNotify = new Map<string, number>(); // key → timestamp
-const ERROR_NOTIFY_COOLDOWN = 5 * 60 * 1000; // 5 минут между одинаковыми ошибками
-
-async function notifyOwner(
-    bot: Bot,
-    env: Env,
-    errorKey: string, // например "vision:zai" или "ai:groq"
-    errorText: string, // текст ошибки
-): Promise<void> {
-    if (!env.OWNER_ID) return;
-
-    const now = Date.now();
-    const last = lastErrorNotify.get(errorKey) ?? 0;
-    if (now - last < ERROR_NOTIFY_COOLDOWN) return; // не спамим
-    lastErrorNotify.set(errorKey, now);
-
-    try {
-        await bot.api.sendMessage(
-            Number(env.OWNER_ID),
-            `⚠️ *Ошибка бота*\n\n` +
-                `Тип: \`${errorKey}\`\n` +
-                `Время: ${new Date().toISOString()}\n\n` +
-                `\`\`\`\n${errorText.slice(0, 500)}\n\`\`\``,
-            { parse_mode: "Markdown" },
-        );
-    } catch (err) {
-        console.error("[notifyOwner] не удалось отправить:", err);
-    }
 }
 
 // ============================================================
