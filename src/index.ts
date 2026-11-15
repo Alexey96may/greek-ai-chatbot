@@ -514,6 +514,21 @@ async function getBot(env: Env): Promise<Bot> {
 
     const bot = new Bot(env.BOT_TOKEN);
     await bot.init();
+
+    bot.use(async (ctx, next) => {
+        if (ctx.message?.text?.startsWith("/start")) {
+            await next();
+            return;
+        }
+
+        if (!isAllowedContext(ctx, env)) return;
+
+        // Автоматические ответы — только в General
+        if (ctx.message?.message_thread_id !== undefined) return;
+
+        await next();
+    });
+
     botUsername = bot.botInfo.username;
     setupHandlers(bot, env);
     botInstance = bot;
