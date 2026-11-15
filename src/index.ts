@@ -117,7 +117,7 @@ async function createEveningPoll(bot: Bot, env: Env) {
 
     const pollMessage = await bot.api.sendPoll(
         Number(env.ALLOWED_CHAT_ID),
-        "📊 Какую тему обсудим завтра?",
+        "Ποιο θέμα να συζητήσουμε αύριο; (Какую тему обсудим завтра?)",
         options,
         { is_anonymous: true, allows_multiple_answers: false },
     );
