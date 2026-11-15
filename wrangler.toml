@@ -11,3 +11,9 @@ id = "018977951b09462ab4e4003994f7f49c" # Создай namespace в дашбор
 # Cron Trigger: запуск каждый день в 6:00 UTC
 [triggers]
 crons = ["0 6 * * *"]
+
+[observability]
+enabled = true
+
+[observability.logs]
+invocation_logs = true

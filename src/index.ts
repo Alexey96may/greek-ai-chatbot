@@ -58,6 +58,21 @@ const COMPANION_SYSTEM_PROMPT = `Ты — дружелюбный участни�
 спросить, что случилось. Не описывай стикер словами — просто реагируй.
 Если уместно — мягко свяжи реакцию с темой дня или словом дня.
 Не навязывай связь насильно — только если это звучит естественно.
+14. Если в сообщении есть [Подпись пользователя к фото] и/или [Описание фото от vision-модели]:
+   - Если пользователь просит описать фото ("опиши фото", "describe the photo",
+     "περιγράψτε τη φωτογραφία", "что на фото") — дай РАЗВЁРНУТОЕ описание
+     в формате экзаменационного ответа (как на устной части языкового экзамена, можно ненавязчиво использовать тему или слово дня).
+     Структура:
+     1) Введение: что это за фото в целом (жанр, место, время суток/года, атмосфера).
+     2) Детали: кто/что изображено, что делает, во что одет, цвета, расположение объектов.
+     3) Эмоции и настроение: какие чувства вызывает фото, какая атмосфера.
+     4) Предположения: почему это происходит, что могло быть до/после, что за история.
+     5) Личное мнение: нравится ли тебе это фото и почему.
+     6) Можно добавить вопрос по фото для остальных участников, чтобы вовлечь их.
+     Объём — 5–8 предложений. Можно с эмоциями и живыми деталями.
+     Отвечай на языке пользователя (или на греческом, если просит по-гречески).
+   - Если пользователь НЕ просит описать, а просто отправил фото — можешь
+     отреагировать коротко и эмоционально, как живой человек.
 
 ПРИМЕРЫ ТОГО, ЧЕГО НЕЛЬЗЯ ДЕЛАТЬ:
 - НЕ пиши "так правильнее", "так звучит естественнее", "вот так будет по-гречески".
@@ -125,7 +140,7 @@ async function askAI(
                     { role: "system", content: systemPrompt },
                     { role: "user", content: userContent },
                 ],
-                max_tokens: 300,
+                max_tokens: 500,
                 temperature: 0.7,
             });
             return res.choices[0]?.message?.content?.trim() ?? "";
@@ -430,6 +445,65 @@ function setupHandlers(bot: Bot, env: Env) {
             // Не отвечаем пользователю с ошибкой, просто логируем
         }
     });
+
+    bot.on("message:photo", async (ctx) => {
+        if (!isAllowedContext(ctx, env)) return;
+        if (ctx.message.from?.is_bot) return;
+
+        const chatId = ctx.chat.id;
+        const messageId = ctx.message.message_id;
+        const caption = ctx.message.caption?.trim() ?? "";
+
+        console.log(`[${chatId}] ФОТО ПОЛУЧЕНО, caption="${caption}"`);
+
+        try {
+            const photos = ctx.message.photo;
+            const bestPhoto = photos[photos.length - 1];
+
+            const file = await ctx.api.getFile(bestPhoto.file_id);
+            if (!file.file_path) throw new Error("Нет file_path");
+
+            const fileUrl = `https://api.telegram.org/file/bot${env.BOT_TOKEN}/${file.file_path}`;
+            const imgRes = await fetch(fileUrl);
+            const arrayBuffer = await imgRes.arrayBuffer();
+            const base64 = arrayBufferToBase64(arrayBuffer);
+
+            console.log(`[${chatId}] спрашиваю Z.AI...`);
+            const description = await askAIWithImage(env, base64, "image/jpeg");
+            if (!description) {
+                console.log(`[${chatId}] Z.AI не смог описать фото`);
+                return;
+            }
+            console.log(`[${chatId}] Z.AI описал: ${description}`);
+
+            const state = await loadState(env);
+            const rawName = ctx.message.from?.first_name;
+            const userName = isReadableName(rawName) ? rawName : undefined;
+
+            // Если есть подпись — передаём её вместе с описанием
+            const userText = caption
+                ? `[Подпись пользователя к фото]: "${caption}"\n[Описание фото]: "${description}"`
+                : `[Пользователь отправил фото. Описание: "${description}"]`;
+
+            const answer = await askAI(
+                env,
+                userText,
+                undefined,
+                userName,
+                state.currentTopic,
+                state.currentWord?.greek,
+            );
+
+            if (answer) {
+                await ctx.reply(answer, {
+                    reply_parameters: { message_id: messageId },
+                });
+                console.log(`[${chatId}] ответил на фото`);
+            }
+        } catch (err) {
+            console.error(`[${chatId}] ошибка обработки фото:`, err);
+        }
+    });
 }
 
 // ============================================================
@@ -501,6 +575,157 @@ function isReadableName(name?: string): boolean {
     if (!name) return false;
     // Только буквы (любой алфавит), пробелы и дефисы. Минимум 2 символа.
     return /^[\p{L}\s-]{2,30}$/u.test(name);
+}
+
+// ============================================================
+// Vision: Z.AI (primary, free but unstable)
+// ============================================================
+async function tryZAI(
+    env: Env,
+    imageBase64: string,
+    mimeType: string = "image/jpeg",
+    retries = 2,
+): Promise<string | null> {
+    if (!env.ZAI_API_KEY) {
+        console.log("[Vision] ZAI_API_KEY не настроен");
+        return null;
+    }
+
+    for (let attempt = 0; attempt <= retries; attempt++) {
+        try {
+            const client = new OpenAI({
+                apiKey: env.ZAI_API_KEY,
+                baseURL: "https://api.z.ai/api/paas/v4",
+            });
+
+            const res = await client.chat.completions.create({
+                model: "glm-4.6v-flash",
+                messages: [
+                    {
+                        role: "user",
+                        content: [
+                            {
+                                type: "text",
+                                text: "Describe what is in this image in 1-2 short sentences. Be natural and friendly. Respond in English.",
+                            },
+                            {
+                                type: "image_url",
+                                image_url: {
+                                    url: `data:${mimeType};base64,${imageBase64}`,
+                                },
+                            },
+                        ],
+                    },
+                ],
+                max_tokens: 200,
+            });
+
+            return res.choices[0]?.message?.content?.trim() ?? null;
+        } catch (err: any) {
+            const status = err?.status;
+            console.log(
+                `[Vision] Z.AI attempt ${attempt + 1} failed: ${status}`,
+            );
+            if ((status === 400 || status === 429) && attempt < retries) {
+                await new Promise((r) => setTimeout(r, 3000 * (attempt + 1)));
+                continue;
+            }
+            console.error("[Vision] Z.AI final error:", err);
+            return null;
+        }
+    }
+    return null;
+}
+
+// ============================================================
+// Vision: Groq (fallback, stable but uses tokens)
+// ============================================================
+async function tryGroqVision(
+    env: Env,
+    imageBase64: string,
+    mimeType: string = "image/jpeg",
+): Promise<string | null> {
+    if (!env.GROQ_API_KEY) {
+        console.log("[Vision] GROQ_API_KEY не настроен");
+        return null;
+    }
+
+    try {
+        const client = new OpenAI({
+            apiKey: env.GROQ_API_KEY,
+            baseURL: "https://api.groq.com/openai/v1",
+        });
+
+        const res = await client.chat.completions.create({
+            model: "qwen/qwen3.8-27b",
+            messages: [
+                {
+                    role: "user",
+                    content: [
+                        {
+                            type: "text",
+                            text: "Describe what is in this image in 1-2 short sentences. Be natural and friendly. Respond in English.",
+                        },
+                        {
+                            type: "image_url",
+                            image_url: {
+                                url: `data:${mimeType};base64,${imageBase64}`,
+                            },
+                        },
+                    ],
+                },
+            ],
+            max_tokens: 200,
+        });
+
+        return res.choices[0]?.message?.content?.trim() ?? null;
+    } catch (err) {
+        console.error("[Vision] Groq error:", err);
+        return null;
+    }
+}
+
+// ============================================================
+// Vision: fallback wrapper (Z.AI → Groq)
+// ============================================================
+async function askAIWithImage(
+    env: Env,
+    imageBase64: string,
+    mimeType: string = "image/jpeg",
+): Promise<string | null> {
+    // 1. Пробуем Z.AI (бесплатно, но нестабильно)
+    if (env.ZAI_API_KEY) {
+        console.log("[Vision] Пробую Z.AI...");
+        const zaiResult = await tryZAI(env, imageBase64, mimeType);
+        if (zaiResult) {
+            console.log("[Vision] Z.AI ответил");
+            return zaiResult;
+        }
+        console.log("[Vision] Z.AI не сработал, переключаюсь на Groq...");
+    }
+
+    // 2. Fallback на Groq (стабильно, но тратит лимит)
+    if (env.GROQ_API_KEY) {
+        console.log("[Vision] Пробую Groq...");
+        const groqResult = await tryGroqVision(env, imageBase64, mimeType);
+        if (groqResult) {
+            console.log("[Vision] Groq ответил");
+            return groqResult;
+        }
+    }
+
+    console.log("[Vision] Все vision-провайдеры недоступны");
+    return null;
+}
+
+function arrayBufferToBase64(buffer: ArrayBuffer): string {
+    const bytes = new Uint8Array(buffer);
+    let binary = "";
+    const chunkSize = 8192;
+    for (let i = 0; i < bytes.length; i += chunkSize) {
+        binary += String.fromCharCode(...bytes.subarray(i, i + chunkSize));
+    }
+    return btoa(binary);
 }
 
 // ============================================================
