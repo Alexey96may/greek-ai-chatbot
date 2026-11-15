@@ -173,3 +173,8 @@ Critical errors are sent to `OWNER_ID` via DM:
 - Cron errors
 
 Each error type has a **5-minute cooldown** to prevent spam. Transient errors (`429` / `503`) are not notified — they're expected behavior with fallback.
+
+## Links
+
+- **Bot:** [@GreekAI_chatbot](https://t.me/GreekAI_chatbot)
+- **Group:** [https://t.me/elenikaglossa](https://t.me/elenikaglossa)
