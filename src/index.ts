@@ -121,6 +121,7 @@ async function askAI(
         name?: string;
         text: string;
     }>,
+    bot?: Bot,
 ): Promise<string> {
     const providers: Array<{ name: string; client: OpenAI; model: string }> =
         [];
@@ -198,9 +199,23 @@ async function askAI(
                 );
                 continue;
             }
+
+            if (bot) {
+                await notifyOwner(
+                    bot,
+                    env,
+                    `ai:${p.name}`,
+                    String(err?.message ?? err),
+                );
+            }
+
             throw err;
         }
     }
+    if (bot) {
+        await notifyOwner(bot, env, "ai:all", "Все AI-провайдеры недоступны");
+    }
+
     throw new Error("Все AI-провайдеры недоступны");
 }
 
@@ -293,19 +308,13 @@ function setupHandlers(bot: Bot, env: Env) {
     // Реакция на стикеры
     // ============================================================
     // Обычные стикеры
-    bot.on("message:sticker", (ctx) => handleSticker(ctx, env));
+    bot.on("message:sticker", (ctx) => handleSticker(ctx, env, bot));
 
     // Видео-стикеры
     bot.on("message:video", async (ctx) => {
         if (ctx.message.video && "sticker" in ctx.message) {
-            await handleSticker(ctx, env);
+            await handleSticker(ctx, env, bot);
         }
-    });
-
-    // Анимированные стикеры (.tgs)
-    bot.on("message:animation", async (ctx) => {
-        // У animation нет emoji, но если это стикер — он придёт как message:sticker
-        // Здесь можно обрабатывать GIF, но для стикеров это не нужно
     });
 
     bot.on("message:text", async (ctx) => {
@@ -359,6 +368,7 @@ function setupHandlers(bot: Bot, env: Env) {
                 state.currentTopic,
                 state.currentWord?.greek,
                 history,
+                bot,
             );
 
             if (answer) {
@@ -424,6 +434,12 @@ function setupHandlers(bot: Bot, env: Env) {
 
             if (!groqResponse.ok) {
                 const errText = await groqResponse.text();
+                await notifyOwner(
+                    bot,
+                    env,
+                    "stt:groq",
+                    `${groqResponse.status} ${errText}`,
+                );
                 throw new Error(
                     `Groq API error: ${groqResponse.status} ${errText}`,
                 );
@@ -456,12 +472,13 @@ function setupHandlers(bot: Bot, env: Env) {
                 state.currentTopic,
                 state.currentWord?.greek,
                 history,
+                bot,
             );
 
             if (answer) {
                 appendHistory(chatId, "user", transcribedText, userName);
                 appendHistory(chatId, "assistant", answer);
-                const audioBytes = await textToSpeech(env, answer);
+                const audioBytes = await textToSpeech(env, answer, bot);
                 if (audioBytes) {
                     try {
                         const caption =
@@ -493,7 +510,7 @@ function setupHandlers(bot: Bot, env: Env) {
             }
         } catch (err) {
             console.error(`[${chatId}] ошибка обработки голосового:`, err);
-            // Не отвечаем пользователю с ошибкой, просто логируем
+            await notifyOwner(bot, env, "voice:processing", String(err));
         }
     });
 
@@ -520,7 +537,12 @@ function setupHandlers(bot: Bot, env: Env) {
             const base64 = arrayBufferToBase64(arrayBuffer);
 
             console.log(`[${chatId}] спрашиваю Z.AI...`);
-            const description = await askAIWithImage(env, base64, "image/jpeg");
+            const description = await askAIWithImage(
+                env,
+                base64,
+                "image/jpeg",
+                bot,
+            );
             if (!description) {
                 console.log(`[${chatId}] Z.AI не смог описать фото`);
                 return;
@@ -546,6 +568,7 @@ function setupHandlers(bot: Bot, env: Env) {
                 state.currentTopic,
                 state.currentWord?.greek,
                 history,
+                bot,
             );
 
             if (answer) {
@@ -558,6 +581,7 @@ function setupHandlers(bot: Bot, env: Env) {
             }
         } catch (err) {
             console.error(`[${chatId}] ошибка обработки фото:`, err);
+            await notifyOwner(bot, env, "photo:processing", String(err));
         }
     });
 }
@@ -594,6 +618,39 @@ async function getBot(env: Env): Promise<Bot> {
 }
 
 // ============================================================
+// Error notifications for the owner (with anti-spam)
+// ============================================================
+const lastErrorNotify = new Map<string, number>(); // key → timestamp
+const ERROR_NOTIFY_COOLDOWN = 5 * 60 * 1000; // 5 минут между одинаковыми ошибками
+
+async function notifyOwner(
+    bot: Bot,
+    env: Env,
+    errorKey: string, // например "vision:zai" или "ai:groq"
+    errorText: string, // текст ошибки
+): Promise<void> {
+    if (!env.OWNER_ID) return;
+
+    const now = Date.now();
+    const last = lastErrorNotify.get(errorKey) ?? 0;
+    if (now - last < ERROR_NOTIFY_COOLDOWN) return; // не спамим
+    lastErrorNotify.set(errorKey, now);
+
+    try {
+        await bot.api.sendMessage(
+            Number(env.OWNER_ID),
+            `⚠️ *Ошибка бота*\n\n` +
+                `Тип: \`${errorKey}\`\n` +
+                `Время: ${new Date().toISOString()}\n\n` +
+                `\`\`\`\n${errorText.slice(0, 500)}\n\`\`\``,
+            { parse_mode: "Markdown" },
+        );
+    } catch (err) {
+        console.error("[notifyOwner] не удалось отправить:", err);
+    }
+}
+
+// ============================================================
 // TTS: ElevenLabs (George)
 // ============================================================
 const ELEVENLABS_VOICE_ID = "JBFqnCBsd6RMkjVDRZzb"; // George
@@ -601,6 +658,7 @@ const ELEVENLABS_VOICE_ID = "JBFqnCBsd6RMkjVDRZzb"; // George
 async function textToSpeech(
     env: Env,
     text: string,
+    bot?: Bot,
 ): Promise<Uint8Array | null> {
     if (!env.ELEVENLABS_API_KEY) {
         console.log("[TTS] ELEVENLABS_API_KEY не настроен");
@@ -631,6 +689,13 @@ async function textToSpeech(
         if (!response.ok) {
             const err = await response.text();
             console.error(`[TTS] ElevenLabs error: ${response.status} ${err}`);
+            if (bot)
+                await notifyOwner(
+                    bot,
+                    env,
+                    "tts:elevenlabs",
+                    `${response.status} ${err}`,
+                );
             return null;
         }
 
@@ -763,8 +828,9 @@ async function askAIWithImage(
     env: Env,
     imageBase64: string,
     mimeType: string = "image/jpeg",
+    bot?: Bot,
 ): Promise<string | null> {
-    // 1. Пробуем Z.AI (бесплатно, но нестабильно)
+    // 1. Z.AI (бесплатно, но нестабильно)
     if (env.ZAI_API_KEY) {
         console.log("[Vision] Пробую Z.AI...");
         const zaiResult = await tryZAI(env, imageBase64, mimeType);
@@ -785,6 +851,15 @@ async function askAIWithImage(
         }
     }
 
+    if (bot) {
+        await notifyOwner(
+            bot,
+            env,
+            "vision:all",
+            "Все vision-провайдеры недоступны",
+        );
+    }
+
     console.log("[Vision] Все vision-провайдеры недоступны");
     return null;
 }
@@ -802,7 +877,7 @@ function arrayBufferToBase64(buffer: ArrayBuffer): string {
 // ============================================================
 // Реакция на стикеры (обычные, анимированные, видео)
 // ============================================================
-async function handleSticker(ctx: Context, env: Env) {
+async function handleSticker(ctx: Context, env: Env, bot: Bot) {
     if (!isAllowedContext(ctx, env)) return;
     if (ctx.message?.from?.is_bot) return;
 
@@ -830,6 +905,7 @@ async function handleSticker(ctx: Context, env: Env) {
             state.currentTopic,
             state.currentWord?.greek,
             history,
+            bot,
         );
 
         if (answer) {
@@ -907,6 +983,7 @@ export default {
             }
         } catch (err) {
             console.error("[cron] Ошибка:", err);
+            await notifyOwner(bot, env, "cron:daily", String(err));
         }
     },
 };
