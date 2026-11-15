@@ -10,6 +10,30 @@ import type { Env } from "./types";
 let botInstance: Bot | null = null;
 let botUsername = "";
 
+const historyMap = new Map<
+    number,
+    Array<{ role: "user" | "assistant"; name?: string; text: string }>
+>();
+const MAX_HISTORY = 10;
+
+function getHistory(chatId: number) {
+    return historyMap.get(chatId) ?? [];
+}
+
+function appendHistory(
+    chatId: number,
+    role: "user" | "assistant",
+    text: string,
+    name?: string,
+) {
+    let history = historyMap.get(chatId) ?? [];
+    history.push({ role, text, name });
+    if (history.length > MAX_HISTORY) {
+        history = history.slice(-MAX_HISTORY);
+    }
+    historyMap.set(chatId, history);
+}
+
 // ============================================================
 // Промпт: «Собеседник»
 // ============================================================
@@ -92,6 +116,11 @@ async function askAI(
     userName?: string,
     topic?: string | null,
     word?: string | null,
+    history?: Array<{
+        role: "user" | "assistant";
+        name?: string;
+        text: string;
+    }>,
 ): Promise<string> {
     const providers: Array<{ name: string; client: OpenAI; model: string }> =
         [];
@@ -127,19 +156,33 @@ async function askAI(
 
     for (const p of providers) {
         try {
+            const messages: Array<{
+                role: "system" | "user" | "assistant";
+                content: string;
+            }> = [{ role: "system", content: systemPrompt }];
+
+            if (history && history.length > 0) {
+                for (const msg of history) {
+                    messages.push({
+                        role: msg.role,
+                        content: msg.name
+                            ? `${msg.name}: ${msg.text}`
+                            : msg.text,
+                    });
+                }
+            }
+
             const parts: string[] = [];
             if (topic) parts.push(`[Тема дня в чате: ${topic}]`);
             if (word) parts.push(`[Слово дня: ${word}]`);
             if (context) parts.push(`[Предыдущее сообщение]: "${context}"`);
             parts.push(`[Сообщение]: ${text}`);
+            messages.push({ role: "user", content: parts.join("\n") });
             const userContent = parts.join("\n");
 
             const res = await p.client.chat.completions.create({
                 model: p.model,
-                messages: [
-                    { role: "system", content: systemPrompt },
-                    { role: "user", content: userContent },
-                ],
+                messages,
                 max_tokens: 500,
                 temperature: 0.7,
             });
@@ -306,6 +349,7 @@ function setupHandlers(bot: Bot, env: Env) {
             const state = await loadState(env);
             const rawName = ctx.message.from?.first_name;
             const userName = isReadableName(rawName) ? rawName : undefined;
+            const history = getHistory(chatId);
 
             const answer = await askAI(
                 env,
@@ -314,9 +358,12 @@ function setupHandlers(bot: Bot, env: Env) {
                 userName,
                 state.currentTopic,
                 state.currentWord?.greek,
+                history,
             );
 
             if (answer) {
+                appendHistory(chatId, "user", cleanText, userName);
+                appendHistory(chatId, "assistant", answer);
                 await ctx.reply(answer, {
                     reply_parameters: { message_id: messageId },
                 });
@@ -399,6 +446,7 @@ function setupHandlers(bot: Bot, env: Env) {
 
             const rawName = ctx.message.from?.first_name;
             const userName = isReadableName(rawName) ? rawName : undefined;
+            const history = getHistory(chatId);
 
             const answer = await askAI(
                 env,
@@ -407,9 +455,12 @@ function setupHandlers(bot: Bot, env: Env) {
                 userName,
                 state.currentTopic,
                 state.currentWord?.greek,
+                history,
             );
 
             if (answer) {
+                appendHistory(chatId, "user", transcribedText, userName);
+                appendHistory(chatId, "assistant", answer);
                 const audioBytes = await textToSpeech(env, answer);
                 if (audioBytes) {
                     try {
@@ -485,6 +536,8 @@ function setupHandlers(bot: Bot, env: Env) {
                 ? `[Подпись пользователя к фото]: "${caption}"\n[Описание фото]: "${description}"`
                 : `[Пользователь отправил фото. Описание: "${description}"]`;
 
+            const history = getHistory(chatId);
+
             const answer = await askAI(
                 env,
                 userText,
@@ -492,9 +545,12 @@ function setupHandlers(bot: Bot, env: Env) {
                 userName,
                 state.currentTopic,
                 state.currentWord?.greek,
+                history,
             );
 
             if (answer) {
+                appendHistory(chatId, "user", userText, userName);
+                appendHistory(chatId, "assistant", answer);
                 await ctx.reply(answer, {
                     reply_parameters: { message_id: messageId },
                 });
@@ -764,6 +820,8 @@ async function handleSticker(ctx: Context, env: Env) {
 
         const stickerText = `[Пользователь отправил стикер с эмодзи: ${emoji}]`;
 
+        const history = getHistory(chatId);
+
         const answer = await askAI(
             env,
             stickerText,
@@ -771,9 +829,12 @@ async function handleSticker(ctx: Context, env: Env) {
             userName,
             state.currentTopic,
             state.currentWord?.greek,
+            history,
         );
 
         if (answer) {
+            appendHistory(chatId, "user", stickerText, userName);
+            appendHistory(chatId, "assistant", answer);
             await ctx.reply(answer, {
                 reply_parameters: { message_id: messageId },
             });
