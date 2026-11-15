@@ -1,7 +1,7 @@
 import type { Bot } from "grammy";
 import type { Env } from "../types";
 import { isAllowedContext } from "../helpers/context";
-import { loadState } from "../state";
+import { loadState, saveState } from "../state";
 
 export function setupCommands(bot: Bot, env: Env) {
     bot.command("start", (ctx) => {
@@ -70,5 +70,42 @@ export function setupCommands(bot: Bot, env: Env) {
         await ctx.reply(`📌 <b>Тема дня:</b> ${state.currentTopic}`, {
             parse_mode: "HTML",
         });
+    });
+
+    bot.command("poll", async (ctx) => {
+        if (!isAllowedContext(ctx, env)) return;
+
+        // Только owner может управлять
+        const isOwner =
+            ctx.chat?.type === "private" &&
+            ctx.chat.id === Number(env.OWNER_ID);
+        if (!isOwner) {
+            return ctx.reply("Эта команда только для создателя.");
+        }
+
+        const arg = ctx.match?.trim().toLowerCase();
+
+        if (arg === "on") {
+            const state = await loadState(env);
+            state.pollEnabled = true;
+            await saveState(env, state);
+            return ctx.reply("✅ Голосование за тему дня включено.");
+        }
+
+        if (arg === "off") {
+            const state = await loadState(env);
+            state.pollEnabled = false;
+            await saveState(env, state);
+            return ctx.reply(
+                "⏸️ Голосование за тему дня выключено. Тема будет генерироваться автоматически.",
+            );
+        }
+
+        // Без аргумента — показать статус
+        const state = await loadState(env);
+        return ctx.reply(
+            `📊 Голосование: ${state.pollEnabled ? "включено" : "выключено"}\n\n` +
+                `Управление: /poll on | /poll off`,
+        );
     });
 }

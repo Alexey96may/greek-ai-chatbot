@@ -102,3 +102,86 @@ export function formatDailyMessage(state: BotState): string {
         `Пример: <tg-spoiler>${w.example}</tg-spoiler>`
     );
 }
+
+export async function generatePollTopics(
+    ai: OpenAI,
+    model: string,
+    count: number,
+    recentTopics: string[],
+): Promise<string[]> {
+    const recentList =
+        recentTopics.length > 0
+            ? `\n\nНЕ повторяй эти недавние темы:\n${recentTopics.map((t) => `- ${t}`).join("\n")}`
+            : "";
+
+    const prompt = `Придумай ${count} разных тем для обсуждения на завтра в чате изучения греческого и русского.
+Темы должны быть простыми, жизненными, вызывающими желание ответить.
+Каждая тема — 1 короткое предложение на греческом (в скобках перевод на русский), до 100 символов.${recentList}
+
+Верни ТОЛЬКО JSON-массив строк без markdown:
+["Τι τρώτε συνήθως για πρωινό; (Что вы обычно едите на завтрак?)", "..."]`;
+
+    const response = await ai.chat.completions.create({
+        model,
+        messages: [{ role: "user", content: prompt }],
+        max_tokens: 500,
+        temperature: 0.9,
+    });
+
+    const raw = response.choices[0]?.message?.content?.trim() ?? "";
+    const cleaned = raw
+        .replace(/^```json\s*/i, "")
+        .replace(/```$/, "")
+        .trim();
+
+    try {
+        const parsed = JSON.parse(cleaned);
+        if (Array.isArray(parsed)) return parsed.slice(0, count).map(String);
+    } catch (e) {
+        console.error("[daily] Не удалось распарсить темы для опроса:", raw);
+    }
+    return [];
+}
+
+export async function generateWordForTopic(
+    ai: OpenAI,
+    model: string,
+    topic: string,
+    recentWords: string[],
+): Promise<DailyWord | null> {
+    const recentList =
+        recentWords.length > 0
+            ? `\n\nНЕ повторяй эти недавние слова:\n${recentWords.map((w) => `- ${w}`).join("\n")}`
+            : "";
+
+    const prompt = `Тема дня в чате изучения греческого: "${topic}".
+Подбери ОДНО греческое слово, связанное с этой темой (не сильно простое, имя существительное или глагол в начальной форме).
+Дай перевод на русский и короткий пример фразы на греческом.${recentList}
+
+Верни ТОЛЬКО валидный JSON без markdown:
+{
+  "greek": "λέξη",
+  "translation": "слово",
+  "example": "Παράδειγμα πρότασης."
+}`;
+
+    const response = await ai.chat.completions.create({
+        model,
+        messages: [{ role: "user", content: prompt }],
+        max_tokens: 200,
+        temperature: 0.7,
+    });
+
+    const raw = response.choices[0]?.message?.content?.trim() ?? "";
+    const cleaned = raw
+        .replace(/^```json\s*/i, "")
+        .replace(/```$/, "")
+        .trim();
+
+    try {
+        return JSON.parse(cleaned) as DailyWord;
+    } catch (e) {
+        console.error("[daily] Не удалось распарсить слово для темы:", raw);
+        return null;
+    }
+}

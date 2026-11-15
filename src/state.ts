@@ -13,6 +13,11 @@ export interface BotState {
     wordRevealed: boolean;
     recentTopics: string[];
     recentWords: string[];
+    pollEnabled: boolean;
+    currentPoll: {
+        messageId: number;
+        options: string[];
+    } | null;
 }
 
 const DEFAULT_STATE: BotState = {
@@ -22,6 +27,8 @@ const DEFAULT_STATE: BotState = {
     wordRevealed: false,
     recentTopics: [],
     recentWords: [],
+    pollEnabled: true,
+    currentPoll: null,
 };
 
 const KV_KEY = "bot_state";

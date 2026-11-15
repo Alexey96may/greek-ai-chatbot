@@ -4,8 +4,13 @@ import OpenAI from "openai";
 import type { Env } from "./types";
 import { isAllowedContext } from "./helpers/context";
 import { notifyOwner } from "./helpers/notify";
-import { loadState } from "./state";
-import { generateDailyTopic, formatDailyMessage } from "./daily";
+import { loadState, saveState } from "./state";
+import {
+    generateDailyTopic,
+    generatePollTopics,
+    generateWordForTopic,
+    formatDailyMessage,
+} from "./daily";
 import { setupHandlers } from "./bot/handlers";
 
 let botInstance: Bot | null = null;
@@ -55,45 +60,16 @@ export default {
         env: Env,
         ctx: ExecutionContext,
     ): Promise<void> {
-        console.log("[cron] Запуск ежедневной проверки...");
+        console.log(`[cron] Сработал триггер: ${controller.cron}`);
         const bot = await getBot(env);
 
         try {
-            const state = await loadState(env);
-            const today = new Date().toISOString().slice(0, 10);
-            if (state.lastTopicDate === today) {
-                console.log("[cron] Тема уже сгенерирована на сегодня");
-                return;
-            }
-
-            const client = env.GEMINI_API_KEY
-                ? new OpenAI({
-                      apiKey: env.GEMINI_API_KEY,
-                      baseURL:
-                          "https://generativelanguage.googleapis.com/v1beta/openai/",
-                  })
-                : new OpenAI({
-                      apiKey: env.GROQ_API_KEY!,
-                      baseURL: "https://api.groq.com/openai/v1",
-                  });
-            const model = env.GEMINI_API_KEY
-                ? "gemini-3.5-flash-lite"
-                : "openai/gpt-oss-20b";
-
-            const newState = await generateDailyTopic(
-                client,
-                model,
-                env,
-                state,
-            );
-
-            if (newState.currentTopic) {
-                await bot.api.sendMessage(
-                    Number(env.ALLOWED_CHAT_ID),
-                    formatDailyMessage(newState),
-                    { parse_mode: "HTML" },
-                );
-                console.log("[cron] Тема отправлена в чат");
+            if (controller.cron === "0 15 * * *") {
+                // Вечер: создать опрос
+                await createEveningPoll(bot, env);
+            } else if (controller.cron === "0 6 * * *") {
+                // Утро: объявить тему
+                await announceMorningTopic(bot, env);
             }
         } catch (err) {
             console.error("[cron] Ошибка:", err);
@@ -101,3 +77,152 @@ export default {
         }
     },
 };
+
+async function createEveningPoll(bot: Bot, env: Env) {
+    const state = await loadState(env);
+
+    if (!state.pollEnabled) {
+        console.log("[cron] Голосование выключено");
+        return;
+    }
+    if (state.currentPoll) {
+        console.log("[cron] Опрос уже создан");
+        return;
+    }
+
+    const client = env.GEMINI_API_KEY
+        ? new OpenAI({
+              apiKey: env.GEMINI_API_KEY,
+              baseURL:
+                  "https://generativelanguage.googleapis.com/v1beta/openai/",
+          })
+        : new OpenAI({
+              apiKey: env.GROQ_API_KEY!,
+              baseURL: "https://api.groq.com/openai/v1",
+          });
+    const model = env.GEMINI_API_KEY
+        ? "gemini-3.5-flash-lite"
+        : "openai/gpt-oss-20b";
+
+    const options = await generatePollTopics(
+        client,
+        model,
+        4,
+        state.recentTopics,
+    );
+    if (options.length < 2) {
+        console.log("[cron] Мало тем, пропускаю опрос");
+        return;
+    }
+
+    const pollMessage = await bot.api.sendPoll(
+        Number(env.ALLOWED_CHAT_ID),
+        "📊 Какую тему обсудим завтра?",
+        options,
+        { is_anonymous: true, allows_multiple_answers: false },
+    );
+
+    state.currentPoll = {
+        messageId: pollMessage.message_id,
+        options,
+    };
+    await saveState(env, state);
+    console.log("[cron] Опрос создан");
+}
+
+async function announceMorningTopic(bot: Bot, env: Env) {
+    const state = await loadState(env);
+    const today = new Date().toISOString().slice(0, 10);
+    if (state.lastTopicDate === today) return;
+
+    let topic: string | null = null;
+
+    // 1. Пробуем закрыть опрос, если он есть
+    if (state.currentPoll && state.pollEnabled) {
+        try {
+            const poll = await bot.api.stopPoll(
+                Number(env.ALLOWED_CHAT_ID),
+                state.currentPoll.messageId,
+            );
+
+            const totalVotes = poll.options.reduce(
+                (sum, o) => sum + (o.voter_count ?? 0),
+                0,
+            );
+
+            let chosen;
+            if (totalVotes === 0) {
+                // Никто не голосовал — берём случайную тему
+                chosen =
+                    poll.options[
+                        Math.floor(Math.random() * poll.options.length)
+                    ];
+                console.log(
+                    `[cron] Никто не голосовал, выбрана случайная тема: ${chosen.text}`,
+                );
+            } else {
+                // Есть голоса — берём победителя
+                chosen = poll.options.reduce((a, b) =>
+                    (b.voter_count ?? 0) > (a.voter_count ?? 0) ? b : a,
+                );
+                console.log(
+                    `[cron] Победитель: ${chosen.text} (${chosen.voter_count} голосов)`,
+                );
+            }
+            topic = chosen.text;
+
+            console.log(`[cron] Победитель: ${topic}`);
+        } catch (err) {
+            console.error(
+                "[cron] Опрос недоступен, генерирую как обычно:",
+                err,
+            );
+        }
+    }
+
+    // 2. Если темы нет — генерируем как обычно
+    const client = env.GEMINI_API_KEY
+        ? new OpenAI({
+              apiKey: env.GEMINI_API_KEY,
+              baseURL:
+                  "https://generativelanguage.googleapis.com/v1beta/openai/",
+          })
+        : new OpenAI({
+              apiKey: env.GROQ_API_KEY!,
+              baseURL: "https://api.groq.com/openai/v1",
+          });
+    const model = env.GEMINI_API_KEY
+        ? "gemini-3.5-flash-lite"
+        : "openai/gpt-oss-20b";
+
+    if (topic) {
+        // Есть победитель — генерируем только слово под тему
+        const word = await generateWordForTopic(
+            client,
+            model,
+            topic,
+            state.recentWords,
+        );
+        state.currentTopic = topic;
+        state.currentWord = word;
+        state.recentTopics = [topic, ...state.recentTopics].slice(0, 7);
+        if (word)
+            state.recentWords = [word.greek, ...state.recentWords].slice(0, 7);
+    } else {
+        // Нет опроса — генерируем всё как обычно
+        const newState = await generateDailyTopic(client, model, env, state);
+        Object.assign(state, newState);
+    }
+
+    state.lastTopicDate = today;
+    state.currentPoll = null;
+    state.wordRevealed = false;
+    await saveState(env, state);
+
+    await bot.api.sendMessage(
+        Number(env.ALLOWED_CHAT_ID),
+        formatDailyMessage(state),
+        { parse_mode: "HTML" },
+    );
+    console.log("[cron] Тема объявлена");
+}
