@@ -136,6 +136,7 @@ async function announceMorningTopic(bot: Bot, env: Env) {
     if (state.lastTopicDate === today) return;
 
     let topic: string | null = null;
+    let tieNote = "";
 
     // 1. Пробуем закрыть опрос, если он есть
     if (state.currentPoll && state.pollEnabled) {
@@ -151,23 +152,41 @@ async function announceMorningTopic(bot: Bot, env: Env) {
             );
 
             let chosen;
+
             if (totalVotes === 0) {
                 // Никто не голосовал — берём случайную тему
                 chosen =
                     poll.options[
                         Math.floor(Math.random() * poll.options.length)
                     ];
+                tieNote = `\n\n<i>Κανείς δεν ψήφισε — διάλεξα τυχαία!</i>`;
                 console.log(
                     `[cron] Никто не голосовал, выбрана случайная тема: ${chosen.text}`,
                 );
             } else {
-                // Есть голоса — берём победителя
-                chosen = poll.options.reduce((a, b) =>
-                    (b.voter_count ?? 0) > (a.voter_count ?? 0) ? b : a,
+                // Есть голоса — находим лидеров
+                const maxVotes = Math.max(
+                    ...poll.options.map((o) => o.voter_count ?? 0),
                 );
-                console.log(
-                    `[cron] Победитель: ${chosen.text} (${chosen.voter_count} голосов)`,
+                const leaders = poll.options.filter(
+                    (o) => (o.voter_count ?? 0) === maxVotes,
                 );
+
+                if (leaders.length > 1) {
+                    // Ничья — выбираем случайного из лидеров
+                    chosen =
+                        leaders[Math.floor(Math.random() * leaders.length)];
+                    tieNote = `\n\n<i>Ισοψηφία! Διάλεξα τυχαία.</i>`;
+                    console.log(
+                        `[cron] Ничья среди ${leaders.length} вариантов (${maxVotes} голосов), выбран: ${chosen.text}`,
+                    );
+                } else {
+                    // Явный победитель
+                    chosen = leaders[0];
+                    console.log(
+                        `[cron] Победитель: ${chosen.text} (${chosen.voter_count} голосов)`,
+                    );
+                }
             }
             topic = chosen.text;
 
@@ -221,7 +240,7 @@ async function announceMorningTopic(bot: Bot, env: Env) {
 
     await bot.api.sendMessage(
         Number(env.ALLOWED_CHAT_ID),
-        formatDailyMessage(state),
+        formatDailyMessage(state) + tieNote,
         { parse_mode: "HTML" },
     );
     console.log("[cron] Тема объявлена");
