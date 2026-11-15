@@ -16,6 +16,7 @@ Deployed on **Cloudflare Workers** with **Workers KV** for storage and **Cron Tr
 - **Direct mentions** — replies instantly when mentioned (`@bot`) or when someone replies to the bot's message.
 - **Immediate replies** — responds right away to general messages in the group.
 - **Daily topic & word** — once a day (via Cron Trigger), generates a discussion topic and a related Greek word with translation and example. Avoids repeating recent topics/words (last 7).
+- **Topic voting** — every evening (18:00 MSK), the bot creates a Telegram poll with 4 AI-generated topics for tomorrow. In the morning, the winner becomes the topic of the day. If nobody voted, a random topic is chosen. Owner can toggle via `/poll on|off`.
 - **Single-chat mode** — works only in the allowed group's **General** room (topic rooms are ignored).
 - **Owner private chat** — the bot also responds in DM to the owner (`OWNER_ID`).
 - **AI fallback** — tries Gemini first, falls back to Groq if Gemini is unavailable or rate-limited.
