@@ -90,14 +90,16 @@ export async function generateDailyTopic(
     }
 }
 
-export function formatDailyMessage(state: BotState): string {
+export function formatDailyMessage(state: BotState, tieNote?: string): string {
     if (!state.currentTopic || !state.currentWord) {
         return "Тема дня ещё не сгенерирована.";
     }
     const w = state.currentWord;
+    const tieLine = tieNote ? `\n${tieNote}` : "";
     return (
-        `📌 <b>Тема дня:</b> ${state.currentTopic}\n\n` +
-        `📖 <b>Слово дня:</b> <code>${w.greek}</code>\n` +
+        `📌 <b>Тема дня:</b> ${state.currentTopic}` +
+        tieLine +
+        `\n\n📖 <b>Слово дня:</b> <code>${w.greek}</code>\n` +
         `Перевод: <tg-spoiler>${w.translation}</tg-spoiler>\n` +
         `Пример: <tg-spoiler>${w.example}</tg-spoiler>`
     );

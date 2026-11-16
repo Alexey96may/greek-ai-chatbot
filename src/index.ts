@@ -159,7 +159,7 @@ async function announceMorningTopic(bot: Bot, env: Env) {
                     poll.options[
                         Math.floor(Math.random() * poll.options.length)
                     ];
-                tieNote = `\n\n<i>Κανείς δεν ψήφισε — διάλεξα τυχαία!</i>`;
+                tieNote = `<i>Κανείς δεν ψήφισε — διάλεξα τυχαία!</i>`;
                 console.log(
                     `[cron] Никто не голосовал, выбрана случайная тема: ${chosen.text}`,
                 );
@@ -176,7 +176,7 @@ async function announceMorningTopic(bot: Bot, env: Env) {
                     // Ничья — выбираем случайного из лидеров
                     chosen =
                         leaders[Math.floor(Math.random() * leaders.length)];
-                    tieNote = `\n\n<i>Ισοψηφία! Διάλεξα τυχαία.</i>`;
+                    tieNote = `<i>Επιλέχθηκε τυχαία λόγω ισοψηφίας.</i>`;
                     console.log(
                         `[cron] Ничья среди ${leaders.length} вариантов (${maxVotes} голосов), выбран: ${chosen.text}`,
                     );
@@ -240,7 +240,7 @@ async function announceMorningTopic(bot: Bot, env: Env) {
 
     await bot.api.sendMessage(
         Number(env.ALLOWED_CHAT_ID),
-        formatDailyMessage(state) + tieNote,
+        formatDailyMessage(state, tieNote),
         { parse_mode: "HTML" },
     );
     console.log("[cron] Тема объявлена");
