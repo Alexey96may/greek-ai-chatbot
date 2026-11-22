@@ -1,32 +1,49 @@
-import type { Bot } from "grammy";
+import type { Bot, Context } from "grammy";
 import type { Env } from "../types";
 import { isAllowedContext } from "../helpers/context";
 import { loadState, saveState } from "../state";
 
-async function replyCommand(ctx: any, text: string, extra: any = {}) {
-    // В личке используем обычный ответ
+type SendMessageExtra = Parameters<Context["reply"]>[1];
+
+async function replyCommand(
+    ctx: Context,
+    text: string,
+    extra: SendMessageExtra = {},
+) {
+    if (!ctx.chat) return;
+
     if (ctx.chat.type === "private") {
         return ctx.reply(text, extra);
     }
 
-    // В группе отвечаем только на эфемерную команду
     const ephemeralMessageId = ctx.message?.ephemeral_message_id;
 
     if (!ephemeralMessageId) {
-        console.warn(
-            "[commands] Нет ephemeral_message_id, публичный ответ отменён",
+        console.error(
+            "[КОМАНДЫ] Нет ephemeral_message_id — ответ не отправлен",
         );
         return;
     }
 
-    return ctx.api.raw.sendMessage({
-        chat_id: ctx.chat.id,
-        text,
-        reply_parameters: {
-            ephemeral_message_id: ephemeralMessageId,
-        },
-        ...extra,
-    });
+    try {
+        const result = await ctx.api.raw.sendMessage({
+            chat_id: ctx.chat.id,
+            text,
+            ...extra,
+
+            ephemeral_message_parameters: {
+                receiver_user_id: ctx.from!.id,
+            },
+
+            reply_parameters: {
+                ephemeral_message_id: ephemeralMessageId,
+            },
+        });
+
+        return result;
+    } catch (error) {
+        console.error("[КОМАНДЫ] Telegram отклонил ответ:", error);
+    }
 }
 
 export function setupCommands(bot: Bot, env: Env) {
