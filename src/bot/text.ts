@@ -4,6 +4,7 @@ import { isAllowedContext } from "../helpers/context";
 import { getHistory, appendHistory } from "../helpers/history";
 import { isReadableName } from "../helpers/names";
 import { askAI } from "../ai/ask";
+import { notifyOwner } from "../helpers/notify";
 import { loadState } from "../state";
 
 export function setupText(bot: Bot, env: Env, botUsername: string) {
@@ -74,6 +75,7 @@ export function setupText(bot: Bot, env: Env, botUsername: string) {
             }
         } catch (err) {
             console.error(`[${chatId}] ошибка при ответе:`, err);
+            await notifyOwner(bot, env, "text:processing", String(err));
         }
     });
 }

@@ -1,4 +1,3 @@
-// src/index.ts
 import { Bot, webhookCallback } from "grammy";
 import OpenAI from "openai";
 import type { Env } from "./types";
