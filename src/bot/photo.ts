@@ -4,6 +4,7 @@ import { isAllowedContext } from "../helpers/context";
 import { notifyOwner } from "../helpers/notify";
 import { getHistory, appendHistory } from "../helpers/history";
 import { isReadableName } from "../helpers/names";
+import { markdownToTelegramHtml } from "../helpers/format";
 import { arrayBufferToBase64 } from "../helpers/base64";
 import { PHOTO_SYSTEM_PROMPT } from "../prompts/photo";
 import { askAI } from "../ai/ask";
@@ -101,7 +102,8 @@ export function setupPhoto(bot: Bot, env: Env) {
                     `→ ${userName ?? "пользователю"}`,
                 );
 
-                await ctx.reply(answer, {
+                await ctx.reply(markdownToTelegramHtml(answer), {
+                    parse_mode: "HTML",
                     reply_parameters: { message_id: messageId },
                 });
 

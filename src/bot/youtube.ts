@@ -3,7 +3,7 @@ import type { Env } from "../types";
 import { getHistory, appendHistory } from "../helpers/history";
 import { notifyOwner } from "../helpers/notify";
 import { YOUTUBE_SYSTEM_PROMPT } from "../prompts/youtube";
-import { markdownToTelegramHtml } from "../helpers/markdownToHtml";
+import { markdownToTelegramHtml } from "../helpers/format";
 
 const GEMINI_MODEL = "gemini-3.5-flash-lite";
 

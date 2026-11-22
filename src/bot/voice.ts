@@ -6,6 +6,7 @@ import { notifyOwner } from "../helpers/notify";
 import { getHistory, appendHistory } from "../helpers/history";
 import { isReadableName } from "../helpers/names";
 import { askAI } from "../ai/ask";
+import { markdownToTelegramHtml } from "../helpers/format";
 import { textToSpeech } from "../ai/tts";
 import { loadState } from "../state";
 
@@ -149,7 +150,8 @@ export function setupVoice(bot: Bot, env: Env) {
                     await ctx.replyWithVoice(
                         new InputFile(audioBytes, "reply.ogg"),
                         {
-                            caption,
+                            caption: markdownToTelegramHtml(caption),
+                            parse_mode: "HTML",
                             reply_parameters: { message_id: messageId },
                         },
                     );
@@ -171,7 +173,8 @@ export function setupVoice(bot: Bot, env: Env) {
 
             await new Promise((resolve) => setTimeout(resolve, delay));
 
-            await ctx.reply(answer, {
+            await ctx.reply(markdownToTelegramHtml(answer), {
+                parse_mode: "HTML",
                 reply_parameters: { message_id: messageId },
             });
 

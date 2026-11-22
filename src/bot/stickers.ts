@@ -3,6 +3,7 @@ import type { Env } from "../types";
 import { isAllowedContext } from "../helpers/context";
 import { getHistory, appendHistory } from "../helpers/history";
 import { isReadableName } from "../helpers/names";
+import { markdownToTelegramHtml } from "../helpers/format";
 import { askAI } from "../ai/ask";
 import { loadState } from "../state";
 
@@ -60,7 +61,8 @@ async function handleSticker(ctx: Context, env: Env, bot: Bot) {
                 `→ ${userName ?? "пользователю"}`,
             );
 
-            await ctx.reply(answer, {
+            await ctx.reply(markdownToTelegramHtml(answer), {
+                parse_mode: "HTML",
                 reply_parameters: { message_id: messageId },
             });
 
