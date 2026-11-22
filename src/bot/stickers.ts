@@ -17,6 +17,8 @@ async function handleSticker(ctx: Context, env: Env, bot: Bot) {
     const chatId = ctx.chat!.id;
     const messageId = ctx.message!.message_id;
 
+    let typingInterval: ReturnType<typeof setInterval> | undefined;
+
     try {
         const state = await loadState(env);
         const rawName = ctx.message?.from?.first_name;
@@ -25,6 +27,14 @@ async function handleSticker(ctx: Context, env: Env, bot: Bot) {
         const stickerText = `[Пользователь отправил стикер с эмодзи: ${emoji}]`;
 
         const history = getHistory(chatId);
+
+        await ctx.api.sendChatAction(chatId, "typing");
+
+        typingInterval = setInterval(() => {
+            void ctx.api.sendChatAction(chatId, "typing").catch((err) => {
+                console.error(`[${chatId}] typing action error:`, err);
+            });
+        }, 4000);
 
         const answer = await askAI(
             env,
@@ -38,6 +48,10 @@ async function handleSticker(ctx: Context, env: Env, bot: Bot) {
         );
 
         if (answer) {
+            const delay = Math.min(3000, Math.max(500, answer.length * 20));
+
+            await new Promise((resolve) => setTimeout(resolve, delay));
+
             appendHistory(chatId, "user", stickerText, userName);
             appendHistory(
                 chatId,
@@ -45,13 +59,19 @@ async function handleSticker(ctx: Context, env: Env, bot: Bot) {
                 answer,
                 `→ ${userName ?? "пользователю"}`,
             );
+
             await ctx.reply(answer, {
                 reply_parameters: { message_id: messageId },
             });
+
             console.log(`[${chatId}] ответил на стикер ${emoji}`);
         }
     } catch (err) {
         console.error(`[${chatId}] ошибка при ответе на стикер:`, err);
+    } finally {
+        if (typingInterval) {
+            clearInterval(typingInterval);
+        }
     }
 }
 

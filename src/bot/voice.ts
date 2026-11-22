@@ -24,7 +24,31 @@ export function setupVoice(bot: Bot, env: Env) {
         const chatId = ctx.chat.id;
         const messageId = ctx.message.message_id;
 
+        let typingInterval: ReturnType<typeof setInterval> | undefined;
+        let currentAction: "typing" | "record_voice" = "record_voice";
+
+        const sendAction = async () => {
+            await ctx.api.sendChatAction(chatId, currentAction);
+        };
+
+        const startActionUpdates = () => {
+            typingInterval = setInterval(() => {
+                void sendAction().catch((err) => {
+                    console.error(`[${chatId}] chat action error:`, err);
+                });
+            }, 4000);
+        };
+
+        const setAction = async (action: "typing" | "record_voice") => {
+            currentAction = action;
+            await sendAction();
+        };
+
         try {
+            // Распознавание входящего голосового.
+            await setAction("record_voice");
+            startActionUpdates();
+
             const file = await ctx.api.getFile(ctx.message.voice.file_id);
             if (!file.file_path) {
                 throw new Error("Не удалось получить путь к файлу");
@@ -32,6 +56,13 @@ export function setupVoice(bot: Bot, env: Env) {
 
             const fileUrl = `https://api.telegram.org/file/bot${env.BOT_TOKEN}/${file.file_path}`;
             const audioResponse = await fetch(fileUrl);
+
+            if (!audioResponse.ok) {
+                throw new Error(
+                    `Ошибка загрузки голосового: ${audioResponse.status}`,
+                );
+            }
+
             const audioBlob = await audioResponse.blob();
 
             const formData = new FormData();
@@ -74,6 +105,9 @@ export function setupVoice(bot: Bot, env: Env) {
 
             console.log(`[${chatId}] распознано: ${transcribedText}`);
 
+            // Генерация текстового ответа.
+            await setAction("typing");
+
             const state = await loadState(env);
             const rawName = ctx.message.from?.first_name;
             const userName = isReadableName(rawName) ? rawName : undefined;
@@ -90,46 +124,65 @@ export function setupVoice(bot: Bot, env: Env) {
                 bot,
             );
 
-            if (answer) {
-                appendHistory(chatId, "user", transcribedText, userName);
-                appendHistory(
-                    chatId,
-                    "assistant",
-                    answer,
-                    `→ ${userName ?? "пользователю"}`,
-                );
-                const audioBytes = await textToSpeech(env, answer, bot);
-                if (audioBytes) {
-                    try {
-                        const caption =
-                            answer.length > 1000
-                                ? answer.slice(0, 997) + "..."
-                                : answer;
-                        await ctx.replyWithVoice(
-                            new InputFile(audioBytes, "reply.ogg"),
-                            {
-                                caption,
-                                reply_parameters: { message_id: messageId },
-                            },
-                        );
-                        console.log(`[${chatId}] ответил голосом + текст`);
-                        return;
-                    } catch (ttsErr) {
-                        console.error(
-                            `[${chatId}] не удалось отправить голосовое:`,
-                            ttsErr,
-                        );
-                    }
-                }
+            if (!answer) return;
 
-                await ctx.reply(answer, {
-                    reply_parameters: { message_id: messageId },
-                });
-                console.log(`[${chatId}] ответил на голосовое (текстом)`);
+            appendHistory(chatId, "user", transcribedText, userName);
+            appendHistory(
+                chatId,
+                "assistant",
+                answer,
+                `→ ${userName ?? "пользователю"}`,
+            );
+
+            // Генерация голосового ответа.
+            await setAction("record_voice");
+
+            const audioBytes = await textToSpeech(env, answer, bot);
+
+            if (audioBytes) {
+                try {
+                    const caption =
+                        answer.length > 1000
+                            ? answer.slice(0, 997) + "..."
+                            : answer;
+
+                    await ctx.replyWithVoice(
+                        new InputFile(audioBytes, "reply.ogg"),
+                        {
+                            caption,
+                            reply_parameters: { message_id: messageId },
+                        },
+                    );
+
+                    console.log(`[${chatId}] ответил голосом + текст`);
+                    return;
+                } catch (ttsErr) {
+                    console.error(
+                        `[${chatId}] не удалось отправить голосовое:`,
+                        ttsErr,
+                    );
+                }
             }
+
+            // Если голос не получился — печатает и отправляет текст.
+            await setAction("typing");
+
+            const delay = Math.min(3000, Math.max(500, answer.length * 20));
+
+            await new Promise((resolve) => setTimeout(resolve, delay));
+
+            await ctx.reply(answer, {
+                reply_parameters: { message_id: messageId },
+            });
+
+            console.log(`[${chatId}] ответил на голосовое (текстом)`);
         } catch (err) {
             console.error(`[${chatId}] ошибка обработки голосового:`, err);
             await notifyOwner(bot, env, "voice:processing", String(err));
+        } finally {
+            if (typingInterval) {
+                clearInterval(typingInterval);
+            }
         }
     });
 }

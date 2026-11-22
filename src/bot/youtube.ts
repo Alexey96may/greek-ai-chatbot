@@ -220,17 +220,10 @@ export function setupYouTubeHandler(bot: Bot, env: Env): void {
         );
 
         try {
-            await ctx.reply("🎬 Анализирую видео...", {
-                reply_parameters: {
-                    message_id: messageId,
-                },
-            });
-
             await ctx.api.sendChatAction(chatId, "typing");
 
             const result = await analyzeYouTube(env, url, instruction, history);
 
-            // Добавляем запрос и ответ в общую историю.
             appendHistory(chatId, "user", text, userName);
             appendHistory(chatId, "assistant", result, `→ ${userName}`);
 

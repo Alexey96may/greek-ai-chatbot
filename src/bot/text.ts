@@ -38,6 +38,8 @@ export function setupText(bot: Bot, env: Env, botUsername: string) {
             return;
         }
 
+        let typingInterval: ReturnType<typeof setInterval> | undefined;
+
         try {
             const cleanText = isDirect
                 ? text.replace(`@${botUsername}`, "").trim() || text
@@ -48,6 +50,15 @@ export function setupText(bot: Bot, env: Env, botUsername: string) {
             const rawName = ctx.message.from?.first_name;
             const userName = isReadableName(rawName) ? rawName : undefined;
             const history = getHistory(chatId);
+
+            // Показываем «печатает…» сразу и обновляем каждые 4 секунды.
+            await ctx.api.sendChatAction(chatId, "typing");
+
+            typingInterval = setInterval(() => {
+                void ctx.api.sendChatAction(chatId, "typing").catch((err) => {
+                    console.error(`[${chatId}] typing action error:`, err);
+                });
+            }, 4000);
 
             const answer = await askAI(
                 env,
@@ -61,6 +72,12 @@ export function setupText(bot: Bot, env: Env, botUsername: string) {
             );
 
             if (answer) {
+                // Небольшая задержка перед отправкой.
+                // Чем длиннее ответ, тем дольше бот «печатает».
+                const delay = Math.min(3000, Math.max(500, answer.length * 20));
+
+                await new Promise((resolve) => setTimeout(resolve, delay));
+
                 appendHistory(chatId, "user", cleanText, userName);
                 appendHistory(
                     chatId,
@@ -68,14 +85,20 @@ export function setupText(bot: Bot, env: Env, botUsername: string) {
                     answer,
                     `→ ${userName ?? "пользователю"}`,
                 );
+
                 await ctx.reply(answer, {
                     reply_parameters: { message_id: messageId },
                 });
+
                 console.log(`[${chatId}] ответил`);
             }
         } catch (err) {
             console.error(`[${chatId}] ошибка при ответе:`, err);
             await notifyOwner(bot, env, "text:processing", String(err));
+        } finally {
+            if (typingInterval) {
+                clearInterval(typingInterval);
+            }
         }
     });
 }
