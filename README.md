@@ -10,16 +10,19 @@ Deployed on **Cloudflare Workers** with **Workers KV** for storage and **Cron Tr
 - **Two target languages** — Greek and Russian. The bot detects which language the user is learning and responds accordingly.
 - **Voice messages** — transcribes voice messages via Groq Whisper and replies with voice (ElevenLabs TTS) plus text caption.
 - **Photo recognition** — describes photos via Z.AI GLM-4.6V-Flash (fallback to Groq vision). Supports exam-style descriptions when asked ("опиши фото").
+- **YouTube Video Analysis** — analyzes YouTube videos directly from shared links. Summarizes video content, extracts key ideas, answers questions about the video, and helps users learn Greek vocabulary and expressions from the actual video. Supports follow-up questions while maintaining conversation context.
 - **Sticker reactions** — reacts to stickers (static, animated, video) by their emoji, via AI.
 - **Conversation memory** — remembers the last 10 messages per chat (separate for group and owner DM). Stored in memory, lost on isolate restart.
 - **Smart silence** — does not interrupt conversations between two people (replies to human messages are ignored).
 - **Direct mentions** — replies instantly when mentioned (`@bot`) or when someone replies to the bot's message.
-- **Immediate replies** — responds right away to general messages in the group.
+- **Live activity indicators** — shows Telegram chat actions while processing requests: "typing…" when generating text responses and "recording a voice message…" while processing or generating audio. Actions are periodically refreshed during long operations and stopped when processing finishes.
+- **Natural response timing** — adds a short delay before sending text replies, making conversations feel more natural.
 - **Daily topic & word** — once a day (via Cron Trigger), generates a discussion topic and a related Greek word with translation and example. Avoids repeating recent topics/words (last 7).
 - **Topic voting** — every evening (18:00 MSK), the bot creates a Telegram poll with 4 AI-generated topics for tomorrow. In the morning, the winner becomes the topic of the day. If nobody voted, a random topic is chosen. Owner can toggle via `/poll on|off`.
 - **Single-chat mode** — works only in the allowed group's **General** room (topic rooms are ignored).
 - **Owner private chat** — the bot also responds in DM to the owner (`OWNER_ID`).
 - **AI fallback** — tries Gemini first, falls back to Groq if Gemini is unavailable or rate-limited.
+- **Vision fallback** — tries Z.AI first, falls back to Groq if Z.AI is unavailable or rate-limited.
 - **Error notifications** — critical errors are sent to the owner via DM (with 5-minute anti-spam cooldown per error type).
 - **/start anywhere** — if someone finds the bot outside the group, `/start` replies with a link to the group.
 
