@@ -25,6 +25,7 @@ Deployed on **Cloudflare Workers** with **Workers KV** for storage and **Cron Tr
 - **Vision fallback** — tries Z.AI first, falls back to Groq if Z.AI is unavailable or rate-limited.
 - **Error notifications** — critical errors are sent to the owner via DM (with 5-minute anti-spam cooldown per error type).
 - **/start anywhere** — if someone finds the bot outside the group, `/start` replies with a link to the group.
+- **Ephemeral commands** — `/help`, `/word`, and `/topic` are available as ephemeral commands in the group. Their invocations and bot replies are visible only to the user who triggered them, keeping personal requests out of the public conversation. `/start` is also configured as an ephemeral group command.
 
 ## Tech Stack
 
@@ -111,18 +112,30 @@ Expected response: {"ok":true,"result":true,"description":"Webhook was set"}.
 
 ### Reply logic
 
-| Situation                           | Bot behavior                                                     |
-| ----------------------------------- | ---------------------------------------------------------------- |
-| Private message from owner          | Replies (text or voice)                                          |
-| Private message from anyone else    | Ignored (only `/start` replies with group link)                  |
-| `@mention` or reply to bot          | Replies immediately                                              |
-| Reply to another human              | Silent (doesn't interrupt)                                       |
-| General message in group            | Replies immediately                                              |
-| Message in a topic room             | Ignored (works only in General)                                  |
-| Voice message                       | Transcribes via Groq Whisper → replies with voice + text caption |
-| Photo                               | Describes via Z.AI → replies with AI answer                      |
-| Sticker (static / animated / video) | Reacts via AI based on emoji                                     |
-| `/start` in non-allowed chat        | Replies with group link                                          |
+| Situation                                     | Bot behavior                                                     |
+| --------------------------------------------- | ---------------------------------------------------------------- |
+| Private message from owner                    | Replies (text or voice)                                          |
+| Private message from anyone else              | Ignored (only `/start` replies with group link)                  |
+| `@mention` or reply to bot                    | Replies immediately                                              |
+| Reply to another human                        | Silent (doesn't interrupt)                                       |
+| General message in group                      | Replies immediately                                              |
+| Message in a topic room                       | Ignored (works only in General)                                  |
+| Voice message                                 | Transcribes via Groq Whisper → replies with voice + text caption |
+| Photo                                         | Describes via Z.AI → replies with AI answer                      |
+| Sticker (static / animated / video)           | Reacts via AI based on emoji                                     |
+| `/start` in non-allowed chat                  | Replies with group link                                          |
+| `/start`, `/help`, `/word`, `/topic` in group | Ephemeral interaction — visible only to the requesting user      |
+| `/poll` in owner's private chat               | Manages topic voting (`/poll on` / `/poll off`)                  |
+
+### Ephemeral commands
+
+The bot supports Telegram Ephemeral Commands in the allowed group:
+
+- `/start`, `/help`, `/word`, and `/topic` are registered with `is_ephemeral: true`.
+- Command messages are visible only to the user and the bot.
+- Bot replies use `reply_parameters.ephemeral_message_id` to remain private.
+- If an ephemeral reply cannot be sent, the bot does not publish the response publicly.
+- `/poll` remains available only in the owner's private chat.
 
 ### Daily topic
 

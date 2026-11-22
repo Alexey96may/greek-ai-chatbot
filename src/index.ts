@@ -21,6 +21,49 @@ async function getBot(env: Env): Promise<Bot> {
     const bot = new Bot(env.BOT_TOKEN);
     await bot.init();
 
+    await bot.api.raw.setMyCommands({
+        scope: {
+            type: "chat",
+            chat_id: Number(env.ALLOWED_CHAT_ID),
+        },
+        commands: [
+            {
+                command: "start",
+                description: "Начать общение",
+                is_ephemeral: true,
+            },
+            {
+                command: "help",
+                description: "Как работает бот",
+                is_ephemeral: true,
+            },
+            {
+                command: "word",
+                description: "Слово дня",
+                is_ephemeral: true,
+            },
+            {
+                command: "topic",
+                description: "Тема дня",
+                is_ephemeral: true,
+            },
+        ],
+    });
+
+    // Команда управления опросом только для владельца
+    await bot.api.raw.setMyCommands({
+        scope: {
+            type: "chat",
+            chat_id: Number(env.OWNER_ID),
+        },
+        commands: [
+            {
+                command: "poll",
+                description: "Управление голосованием",
+            },
+        ],
+    });
+
     bot.use(async (ctx, next) => {
         if (ctx.message?.text?.startsWith("/start")) {
             await next();

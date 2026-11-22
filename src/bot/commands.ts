@@ -3,10 +3,37 @@ import type { Env } from "../types";
 import { isAllowedContext } from "../helpers/context";
 import { loadState, saveState } from "../state";
 
+async function replyCommand(ctx: any, text: string, extra: any = {}) {
+    // В личке используем обычный ответ
+    if (ctx.chat.type === "private") {
+        return ctx.reply(text, extra);
+    }
+
+    // В группе отвечаем только на эфемерную команду
+    const ephemeralMessageId = ctx.message?.ephemeral_message_id;
+
+    if (!ephemeralMessageId) {
+        console.warn(
+            "[commands] Нет ephemeral_message_id, публичный ответ отменён",
+        );
+        return;
+    }
+
+    return ctx.api.raw.sendMessage({
+        chat_id: ctx.chat.id,
+        text,
+        reply_parameters: {
+            ephemeral_message_id: ephemeralMessageId,
+        },
+        ...extra,
+    });
+}
+
 export function setupCommands(bot: Bot, env: Env) {
     bot.command("start", (ctx) => {
         if (isAllowedContext(ctx, env)) {
-            return ctx.reply(
+            return replyCommand(
+                ctx,
                 "Γεια σου! 👋\n\n" +
                     "Я — собеседник для практики греческого и русского. Просто общайся в чате.\n" +
                     "Команды:\n/help — помощь\n/word — слово дня\n/topic — тема дня",
@@ -23,7 +50,8 @@ export function setupCommands(bot: Bot, env: Env) {
 
     bot.command("help", (ctx) => {
         if (!isAllowedContext(ctx, env)) return;
-        return ctx.reply(
+        return replyCommand(
+            ctx,
             "Как я работаю:\n\n" +
                 "📝 *Текст*\n" +
                 "• Отвечаю на сообщения в этой группе.\n" +
@@ -36,6 +64,12 @@ export function setupCommands(bot: Bot, env: Env) {
                 "🖼️ *Фото*\n" +
                 "• Могу посмотреть фото и описать, что на нём. Но это получается не всегда!\n" +
                 "• Если попросишь «опиши фото» — дам развёрнутое описание как на экзамене (5–8 предложений, с деталями и эмоциями).\n\n" +
+                "🎬 *YouTube-видео*\n" +
+                "• Отправь ссылку на YouTube — проанализирую видео и расскажу, о чём оно.\n" +
+                "• Могу сделать краткий пересказ, выделить главные мысли, ответить на вопросы и выписать полезные греческие слова.\n" +
+                "• Можно задавать дополнительные вопросы по видео.\n" +
+                "• Чем длиннее видео, тем дольше может занять анализ и тем больше бесплатных ресурсов он расходует.\n" +
+                "• Очень длинные видео могут не обработаться из-за технических ограничений.\n\n" +
                 "📅 *Тема и слово дня*\n" +
                 "• Каждый день в 9:00 МСК присылаю тему и слово дня.\n" +
                 "• /word — показать слово дня.\n" +
@@ -46,7 +80,7 @@ export function setupCommands(bot: Bot, env: Env) {
                 "• Если никто не голосовал — выберу случайную тему.\n\n" +
                 "⚠️ *Ограничения*\n" +
                 "• Работаю только в этой группе (в общей теме)!\n" +
-                "• Не умею генерировать картинки и видео — только общаюсь.\n" +
+                "• Не умею генерировать картинки и видео — только анализировать фото и YouTube-видео.\n" +
                 "• Могу забыть контекст беседы.\n",
             { parse_mode: "Markdown" },
         );
@@ -56,9 +90,10 @@ export function setupCommands(bot: Bot, env: Env) {
         if (!isAllowedContext(ctx, env)) return;
         const state = await loadState(env);
         if (!state.currentWord)
-            return ctx.reply("Слово дня ещё не сгенерировано.");
+            return replyCommand(ctx, "Слово дня ещё не сгенерировано.");
         const w = state.currentWord;
-        await ctx.reply(
+        await replyCommand(
+            ctx,
             `📖 <b>Слово дня:</b> <code>${w.greek}</code>\n\n` +
                 `Перевод: <tg-spoiler>${w.translation}</tg-spoiler>\n` +
                 `Пример: <tg-spoiler>${w.example}</tg-spoiler>`,
@@ -70,8 +105,8 @@ export function setupCommands(bot: Bot, env: Env) {
         if (!isAllowedContext(ctx, env)) return;
         const state = await loadState(env);
         if (!state.currentTopic)
-            return ctx.reply("Тема дня ещё не сгенерирована.");
-        await ctx.reply(`📌 <b>Тема дня:</b> ${state.currentTopic}`, {
+            return replyCommand(ctx, "Тема дня ещё не сгенерирована.");
+        await replyCommand(ctx, `📌 <b>Тема дня:</b> ${state.currentTopic}`, {
             parse_mode: "HTML",
         });
     });
