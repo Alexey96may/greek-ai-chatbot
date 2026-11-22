@@ -39,7 +39,12 @@ async function handleSticker(ctx: Context, env: Env, bot: Bot) {
 
         if (answer) {
             appendHistory(chatId, "user", stickerText, userName);
-            appendHistory(chatId, "assistant", answer);
+            appendHistory(
+                chatId,
+                "assistant",
+                answer,
+                `→ ${userName ?? "пользователю"}`,
+            );
             await ctx.reply(answer, {
                 reply_parameters: { message_id: messageId },
             });

@@ -92,7 +92,12 @@ export function setupVoice(bot: Bot, env: Env) {
 
             if (answer) {
                 appendHistory(chatId, "user", transcribedText, userName);
-                appendHistory(chatId, "assistant", answer);
+                appendHistory(
+                    chatId,
+                    "assistant",
+                    answer,
+                    `→ ${userName ?? "пользователю"}`,
+                );
                 const audioBytes = await textToSpeech(env, answer, bot);
                 if (audioBytes) {
                     try {

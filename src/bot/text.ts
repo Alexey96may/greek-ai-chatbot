@@ -61,7 +61,12 @@ export function setupText(bot: Bot, env: Env, botUsername: string) {
 
             if (answer) {
                 appendHistory(chatId, "user", cleanText, userName);
-                appendHistory(chatId, "assistant", answer);
+                appendHistory(
+                    chatId,
+                    "assistant",
+                    answer,
+                    `→ ${userName ?? "пользователю"}`,
+                );
                 await ctx.reply(answer, {
                     reply_parameters: { message_id: messageId },
                 });

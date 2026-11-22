@@ -30,7 +30,7 @@ async function getBot(env: Env): Promise<Bot> {
 
         if (!isAllowedContext(ctx, env)) return;
 
-        // Автоматические ответы — только в General
+        // General
         if (ctx.message?.message_thread_id !== undefined) return;
 
         await next();

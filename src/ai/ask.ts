@@ -44,7 +44,7 @@ export async function askAI(
     if (providers.length === 0) throw new Error("Нет AI-провайдеров");
 
     const systemPrompt = userName
-        ? `${COMPANION_SYSTEM_PROMPT}\n\nСейчас с тобой говорит: ${userName}.`
+        ? `${COMPANION_SYSTEM_PROMPT}\n\n[Сейчас пишет: ${userName}. Отвечай именно ему/ей, учитывая историю ниже. В истории могут быть сообщения других участников — не путай их с текущим.]`
         : COMPANION_SYSTEM_PROMPT;
 
     for (const p of providers) {

@@ -68,7 +68,12 @@ export function setupPhoto(bot: Bot, env: Env) {
 
             if (answer) {
                 appendHistory(chatId, "user", userText, userName);
-                appendHistory(chatId, "assistant", answer);
+                appendHistory(
+                    chatId,
+                    "assistant",
+                    answer,
+                    `→ ${userName ?? "пользователю"}`,
+                );
                 await ctx.reply(answer, {
                     reply_parameters: { message_id: messageId },
                 });
