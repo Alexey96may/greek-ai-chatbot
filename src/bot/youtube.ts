@@ -3,6 +3,7 @@ import type { Env } from "../types";
 import { getHistory, appendHistory } from "../helpers/history";
 import { notifyOwner } from "../helpers/notify";
 import { YOUTUBE_SYSTEM_PROMPT } from "../prompts/youtube";
+import { markdownToTelegramHtml } from "../helpers/markdownToHtml";
 
 const GEMINI_MODEL = "gemini-3.5-flash-lite";
 
@@ -230,7 +231,8 @@ export function setupYouTubeHandler(bot: Bot, env: Env): void {
             const chunks = splitMessage(result);
 
             for (const chunk of chunks) {
-                await ctx.reply(chunk, {
+                await ctx.reply(markdownToTelegramHtml(chunk), {
+                    parse_mode: "HTML",
                     reply_parameters: {
                         message_id: messageId,
                     },
