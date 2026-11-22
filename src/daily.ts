@@ -2,25 +2,10 @@ import OpenAI from "openai";
 import type { BotState, DailyWord } from "./state";
 import { saveState, todayString } from "./state";
 import type { Env } from "./types";
-
-const BASE_PROMPT = `Ты — помощник в чате взаимного изучения греческого и русского языков.
-Придумай интересную тему для обсуждения на сегодня (1 короткое предложение на греческом (в скобках с переводом на русский), до 100 символов).
-Тема должна подходить для практики языка: простая, жизненная, вызывающая желание ответить.
-Подбери ОДНО греческое слово, связанное с темой, не сильно простое (имя существительное в именительном падеже единственного числа с определенным артиклем или глагол в начальной форме).
-К слову дай перевод на русский и короткий пример фразы на греческом.
-
-Верни ТОЛЬКО валидный JSON без markdown:
-{
-  "topic": "Тема для обсуждения",
-  "word": {
-    "greek": "η λέξη",
-    "translation": "слово",
-    "example": "Παράδειγμα πρότασης."
-  }
-}`;
+import { BASE_DAILY_PROMPT } from "./prompts/daily";
 
 function buildPrompt(state: BotState): string {
-    const parts = [BASE_PROMPT];
+    const parts = [BASE_DAILY_PROMPT];
 
     if (state.recentTopics.length > 0) {
         parts.push(

@@ -1,7 +1,7 @@
 import type { Bot } from "grammy";
 import OpenAI from "openai";
 import type { Env } from "../types";
-import { COMPANION_SYSTEM_PROMPT } from "../prompts";
+import { COMPANION_SYSTEM_PROMPT } from "../prompts/index";
 import type { HistoryMessage } from "../helpers/history";
 import { notifyOwner } from "../helpers/notify";
 
@@ -14,6 +14,7 @@ export async function askAI(
     word?: string | null,
     history?: HistoryMessage[],
     bot?: Bot,
+    prompt?: string,
 ): Promise<string> {
     const providers: Array<{ name: string; client: OpenAI; model: string }> =
         [];
@@ -43,9 +44,11 @@ export async function askAI(
 
     if (providers.length === 0) throw new Error("Нет AI-провайдеров");
 
+    const originalSystemPrompt = prompt ?? COMPANION_SYSTEM_PROMPT;
+
     const systemPrompt = userName
-        ? `${COMPANION_SYSTEM_PROMPT}\n\n[Сейчас пишет: ${userName}. Отвечай именно ему/ей, учитывая историю ниже. В истории могут быть сообщения других участников — не путай их с текущим.]`
-        : COMPANION_SYSTEM_PROMPT;
+        ? `${originalSystemPrompt}\n\n[Сейчас пишет: ${userName}. Отвечай именно ему/ей, учитывая историю ниже. В истории могут быть сообщения других участников — не путай их с текущим.]`
+        : originalSystemPrompt;
 
     for (const p of providers) {
         try {

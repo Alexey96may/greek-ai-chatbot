@@ -5,6 +5,7 @@ import { notifyOwner } from "../helpers/notify";
 import { getHistory, appendHistory } from "../helpers/history";
 import { isReadableName } from "../helpers/names";
 import { arrayBufferToBase64 } from "../helpers/base64";
+import { PHOTO_SYSTEM_PROMPT } from "../prompts/photo";
 import { askAI } from "../ai/ask";
 import { askAIWithImage } from "../ai/vision";
 import { loadState } from "../state";
@@ -64,6 +65,7 @@ export function setupPhoto(bot: Bot, env: Env) {
                 state.currentWord?.greek,
                 history,
                 bot,
+                PHOTO_SYSTEM_PROMPT,
             );
 
             if (answer) {
