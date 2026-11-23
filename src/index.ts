@@ -21,49 +21,6 @@ async function getBot(env: Env): Promise<Bot> {
     const bot = new Bot(env.BOT_TOKEN);
     await bot.init();
 
-    await bot.api.raw.setMyCommands({
-        scope: {
-            type: "chat",
-            chat_id: Number(env.ALLOWED_CHAT_ID),
-        },
-        commands: [
-            {
-                command: "start",
-                description: "Начать общение",
-                is_ephemeral: true,
-            },
-            {
-                command: "help",
-                description: "Как работает бот",
-                is_ephemeral: true,
-            },
-            {
-                command: "word",
-                description: "Слово дня",
-                is_ephemeral: true,
-            },
-            {
-                command: "topic",
-                description: "Тема дня",
-                is_ephemeral: true,
-            },
-        ],
-    });
-
-    // Команда управления опросом только для владельца
-    await bot.api.raw.setMyCommands({
-        scope: {
-            type: "chat",
-            chat_id: Number(env.OWNER_ID),
-        },
-        commands: [
-            {
-                command: "poll",
-                description: "Управление голосованием",
-            },
-        ],
-    });
-
     bot.use(async (ctx, next) => {
         if (ctx.message?.text?.startsWith("/start")) {
             await next();
@@ -114,7 +71,26 @@ export default {
                 await announceMorningTopic(bot, env);
             }
         } catch (err) {
-            console.error("[cron] Ошибка:", err);
+            const e = err as {
+                name?: string;
+                message?: string;
+                status?: number;
+                code?: string;
+                type?: string;
+                request_id?: string;
+                error?: unknown;
+            };
+
+            console.error("[cron] Ошибка:", {
+                name: e.name,
+                message: e.message,
+                status: e.status,
+                code: e.code,
+                type: e.type,
+                request_id: e.request_id,
+                providerError: e.error,
+            });
+
             await notifyOwner(bot, env, "cron:daily", String(err));
         }
     },
@@ -132,19 +108,7 @@ async function createEveningPoll(bot: Bot, env: Env) {
         return;
     }
 
-    const client = env.GEMINI_API_KEY
-        ? new OpenAI({
-              apiKey: env.GEMINI_API_KEY,
-              baseURL:
-                  "https://generativelanguage.googleapis.com/v1beta/openai/",
-          })
-        : new OpenAI({
-              apiKey: env.GROQ_API_KEY!,
-              baseURL: "https://api.groq.com/openai/v1",
-          });
-    const model = env.GEMINI_API_KEY
-        ? "gemini-3.5-flash-lite"
-        : "openai/gpt-oss-20b";
+    const { client, model } = createAI(env);
 
     const options = await generatePollTopics(
         client,
@@ -242,19 +206,7 @@ async function announceMorningTopic(bot: Bot, env: Env) {
     }
 
     // 2. Если темы нет — генерируем как обычно
-    const client = env.GEMINI_API_KEY
-        ? new OpenAI({
-              apiKey: env.GEMINI_API_KEY,
-              baseURL:
-                  "https://generativelanguage.googleapis.com/v1beta/openai/",
-          })
-        : new OpenAI({
-              apiKey: env.GROQ_API_KEY!,
-              baseURL: "https://api.groq.com/openai/v1",
-          });
-    const model = env.GEMINI_API_KEY
-        ? "gemini-3.5-flash-lite"
-        : "openai/gpt-oss-20b";
+    const { client, model } = createAI(env);
 
     if (topic) {
         // Есть победитель — генерируем только слово под тему
@@ -286,4 +238,26 @@ async function announceMorningTopic(bot: Bot, env: Env) {
         { parse_mode: "HTML" },
     );
     console.log("[cron] Тема объявлена");
+}
+
+function createAI(env: Env): { client: OpenAI; model: string } {
+    const useGemini = Boolean(env.GEMINI_API_KEY);
+
+    const client = new OpenAI({
+        apiKey: useGemini ? env.GEMINI_API_KEY! : env.GROQ_API_KEY!,
+        baseURL: useGemini
+            ? "https://generativelanguage.googleapis.com/v1beta/openai/"
+            : "https://api.groq.com/openai/v1",
+
+        // Не ждать провайдера бесконечно
+        timeout: 25_000,
+
+        // Отключаем автоматические повторы SDK
+        maxRetries: 0,
+    });
+
+    return {
+        client,
+        model: useGemini ? "gemini-3.5-flash-lite" : "openai/gpt-oss-20b",
+    };
 }

@@ -257,14 +257,11 @@ export function setupYouTubeHandler(bot: Bot, env: Env): void {
                 );
             }
 
-            await ctx.reply(
-                "Не удалось проанализировать видео 😕\nПопробуй ещё раз немного позже.",
-                {
-                    reply_parameters: {
-                        message_id: messageId,
-                    },
+            await ctx.reply("Не могу посмотреть это видео 😕", {
+                reply_parameters: {
+                    message_id: messageId,
                 },
-            );
+            });
         }
     });
 }
