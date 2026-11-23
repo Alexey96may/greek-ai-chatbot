@@ -49,8 +49,13 @@ export default {
         env: Env,
         ctx: ExecutionContext,
     ): Promise<Response> {
+        if (request.method !== "POST") {
+            return new Response("Bot is running", { status: 200 });
+        }
+
         const bot = await getBot(env);
         const handler = webhookCallback(bot, "cloudflare-mod");
+
         return await handler(request);
     },
 
@@ -59,17 +64,32 @@ export default {
         env: Env,
         ctx: ExecutionContext,
     ): Promise<void> {
-        console.log(`[cron] Сработал триггер: ${controller.cron}`);
-        const bot = await getBot(env);
+        console.log("[cron] START", {
+            cron: controller.cron,
+            scheduledTime: new Date(controller.scheduledTime).toISOString(),
+            actualTime: new Date().toISOString(),
+        });
+
+        let bot: Bot | undefined;
 
         try {
+            console.log("[cron] Инициализация бота...");
+            bot = await getBot(env);
+            console.log("[cron] Бот готов");
+
             if (controller.cron === "0 15 * * *") {
-                // Вечер: создать опрос
+                console.log("[cron] Запускаю вечерний опрос");
                 await createEveningPoll(bot, env);
+                console.log("[cron] Вечерний опрос завершён");
             } else if (controller.cron === "0 6 * * *") {
-                // Утро: объявить тему
+                console.log("[cron] Запускаю утреннюю тему");
                 await announceMorningTopic(bot, env);
+                console.log("[cron] Утренняя тема завершена");
+            } else {
+                console.warn("[cron] Неизвестный cron:", controller.cron);
             }
+
+            console.log("[cron] SUCCESS");
         } catch (err) {
             const e = err as {
                 name?: string;
@@ -91,7 +111,16 @@ export default {
                 providerError: e.error,
             });
 
-            await notifyOwner(bot, env, "cron:daily", String(err));
+            if (bot) {
+                try {
+                    await notifyOwner(bot, env, "cron:daily", String(err));
+                } catch (notifyErr) {
+                    console.error(
+                        "[cron] Не удалось уведомить владельца:",
+                        notifyErr,
+                    );
+                }
+            }
         }
     },
 };
@@ -108,14 +137,10 @@ async function createEveningPoll(bot: Bot, env: Env) {
         return;
     }
 
-    const { client, model } = createAI(env);
-
-    const options = await generatePollTopics(
-        client,
-        model,
-        4,
-        state.recentTopics,
+    const options = await withAIFallback(env, (client, model) =>
+        generatePollTopics(client, model, 4, state.recentTopics),
     );
+
     if (options.length < 2) {
         console.log("[cron] Мало тем, пропускаю опрос");
         return;
@@ -205,16 +230,10 @@ async function announceMorningTopic(bot: Bot, env: Env) {
         }
     }
 
-    // 2. Если темы нет — генерируем как обычно
-    const { client, model } = createAI(env);
-
     if (topic) {
         // Есть победитель — генерируем только слово под тему
-        const word = await generateWordForTopic(
-            client,
-            model,
-            topic,
-            state.recentWords,
+        const word = await withAIFallback(env, (client, model) =>
+            generateWordForTopic(client, model, topic!, state.recentWords),
         );
         state.currentTopic = topic;
         state.currentWord = word;
@@ -223,7 +242,9 @@ async function announceMorningTopic(bot: Bot, env: Env) {
             state.recentWords = [word.greek, ...state.recentWords].slice(0, 7);
     } else {
         // Нет опроса — генерируем всё как обычно
-        const newState = await generateDailyTopic(client, model, env, state);
+        const newState = await withAIFallback(env, (client, model) =>
+            generateDailyTopic(client, model, env, state),
+        );
         Object.assign(state, newState);
     }
 
@@ -240,24 +261,83 @@ async function announceMorningTopic(bot: Bot, env: Env) {
     console.log("[cron] Тема объявлена");
 }
 
-function createAI(env: Env): { client: OpenAI; model: string } {
-    const useGemini = Boolean(env.GEMINI_API_KEY);
+async function withAIFallback<T>(
+    env: Env,
+    generate: (client: OpenAI, model: string) => Promise<T>,
+): Promise<T> {
+    const providers: Array<{
+        name: string;
+        client: OpenAI;
+        model: string;
+    }> = [];
 
-    const client = new OpenAI({
-        apiKey: useGemini ? env.GEMINI_API_KEY! : env.GROQ_API_KEY!,
-        baseURL: useGemini
-            ? "https://generativelanguage.googleapis.com/v1beta/openai/"
-            : "https://api.groq.com/openai/v1",
+    if (env.GEMINI_API_KEY) {
+        providers.push({
+            name: "gemini",
+            client: new OpenAI({
+                apiKey: env.GEMINI_API_KEY,
+                baseURL:
+                    "https://generativelanguage.googleapis.com/v1beta/openai/",
+                timeout: 25_000,
+                maxRetries: 0,
+            }),
+            model: "gemini-3.5-flash-lite",
+        });
+    }
 
-        // Не ждать провайдера бесконечно
-        timeout: 25_000,
+    if (env.GROQ_API_KEY) {
+        providers.push({
+            name: "groq",
+            client: new OpenAI({
+                apiKey: env.GROQ_API_KEY,
+                baseURL: "https://api.groq.com/openai/v1",
+                timeout: 25_000,
+                maxRetries: 0,
+            }),
+            model: "openai/gpt-oss-20b",
+        });
+    }
 
-        // Отключаем автоматические повторы SDK
-        maxRetries: 0,
-    });
+    if (providers.length === 0) {
+        throw new Error("Не настроены GEMINI_API_KEY и GROQ_API_KEY");
+    }
 
-    return {
-        client,
-        model: useGemini ? "gemini-3.5-flash-lite" : "openai/gpt-oss-20b",
-    };
+    let lastError: unknown;
+
+    for (const provider of providers) {
+        try {
+            console.log(`[AI] Использую ${provider.name}`);
+
+            const result = await generate(provider.client, provider.model);
+
+            console.log(`[AI] Успешная генерация через ${provider.name}`);
+            return result;
+        } catch (err) {
+            lastError = err;
+
+            const error = err as {
+                status?: number;
+                code?: string;
+                message?: string;
+            };
+
+            const retryable =
+                [408, 409, 429, 500, 502, 503, 504].includes(
+                    error.status ?? 0,
+                ) ||
+                error.code === "ETIMEDOUT" ||
+                error.code === "ECONNRESET" ||
+                error.code === "ECONNREFUSED";
+
+            console.error(`[AI] ${provider.name} не сработал:`, err);
+
+            if (!retryable) {
+                throw err;
+            }
+
+            console.warn(`[AI] Ошибка временная, пробую следующего провайдера`);
+        }
+    }
+
+    throw lastError ?? new Error("Все AI-провайдеры недоступны");
 }
