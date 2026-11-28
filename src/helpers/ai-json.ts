@@ -1,7 +1,8 @@
 export function stripMarkdownCodeFence(raw: string): string {
     return raw
-        .replace(/^```json\s*/i, "")
-        .replace(/```$/, "")
+        .trim()
+        .replace(/^```[a-z]*\s*/i, "")
+        .replace(/\s*```$/, "")
         .trim();
 }
 

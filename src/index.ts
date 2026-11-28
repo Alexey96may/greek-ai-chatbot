@@ -35,7 +35,7 @@ async function getBot(env: Env): Promise<Bot> {
         await next();
     });
 
-    botUsername = bot.botInfo.username;
+    botUsername = bot.botInfo.username || "";
     setupHandlers(bot, env, botUsername);
     botInstance = bot;
 
