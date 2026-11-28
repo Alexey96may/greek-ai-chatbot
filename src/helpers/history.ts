@@ -24,3 +24,11 @@ export function appendHistory(
     }
     historyMap.set(chatId, history);
 }
+
+export function clearHistory(chatId?: number): void {
+    if (chatId === undefined) {
+        historyMap.clear();
+    } else {
+        historyMap.delete(chatId);
+    }
+}

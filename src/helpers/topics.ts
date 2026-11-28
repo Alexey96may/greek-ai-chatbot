@@ -14,11 +14,16 @@ export function pickFocusCategory(): string {
 }
 
 export function dedupeExact(topics: string[]): string[] {
-    return [
-        ...new Map(
-            topics.map((topic) => [topic.toLocaleLowerCase(), topic]),
-        ).values(),
-    ];
+    const seen = new Set<string>();
+    const result: string[] = [];
+    for (const t of topics) {
+        const key = t.toLocaleLowerCase();
+        if (!seen.has(key)) {
+            seen.add(key);
+            result.push(t);
+        }
+    }
+    return result;
 }
 
 export function normalizeTopic(t: string): Set<string> {

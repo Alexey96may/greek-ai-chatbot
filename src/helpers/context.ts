@@ -2,7 +2,11 @@ import type { Context } from "grammy";
 import type { Env } from "../types";
 
 export function isAllowedChat(ctx: Context, env: Env): boolean {
-    return ctx.chat?.id === Number(env.ALLOWED_CHAT_ID);
+    const allowedId = Number(env.ALLOWED_CHAT_ID);
+    if (!env.ALLOWED_CHAT_ID || Number.isNaN(allowedId)) {
+        return false;
+    }
+    return ctx.chat?.id === allowedId;
 }
 
 export function isOwnerPrivate(ctx: Context, env: Env): boolean {

@@ -30,3 +30,7 @@ export async function notifyOwner(
         console.error("[notifyOwner] не удалось отправить:", err);
     }
 }
+
+export function clearNotifyCache(): void {
+    lastErrorNotify.clear();
+}
