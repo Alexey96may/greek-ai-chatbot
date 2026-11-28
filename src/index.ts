@@ -1,5 +1,5 @@
 import { Bot, webhookCallback } from "grammy";
-import OpenAI from "openai";
+import { createEveningPoll, withAIFallback } from "./poll";
 import type { Env } from "./types";
 import { isAllowedContext } from "./helpers/context";
 import { notifyOwner } from "./helpers/notify";
@@ -125,42 +125,6 @@ export default {
     },
 };
 
-async function createEveningPoll(bot: Bot, env: Env) {
-    const state = await loadState(env);
-
-    if (!state.pollEnabled) {
-        console.log("[cron] Голосование выключено");
-        return;
-    }
-    if (state.currentPoll) {
-        console.log("[cron] Опрос уже создан");
-        return;
-    }
-
-    const options = await withAIFallback(env, (client, model) =>
-        generatePollTopics(client, model, 4, state.recentTopics),
-    );
-
-    if (options.length < 2) {
-        console.log("[cron] Мало тем, пропускаю опрос");
-        return;
-    }
-
-    const pollMessage = await bot.api.sendPoll(
-        Number(env.ALLOWED_CHAT_ID),
-        "Ποιο θέμα να συζητήσουμε αύριο; (Какую тему обсудим завтра?)",
-        options,
-        { is_anonymous: true, allows_multiple_answers: false },
-    );
-
-    state.currentPoll = {
-        messageId: pollMessage.message_id,
-        options,
-    };
-    await saveState(env, state);
-    console.log("[cron] Опрос создан");
-}
-
 async function announceMorningTopic(bot: Bot, env: Env) {
     const state = await loadState(env);
     const today = new Date().toISOString().slice(0, 10);
@@ -259,85 +223,4 @@ async function announceMorningTopic(bot: Bot, env: Env) {
         { parse_mode: "HTML" },
     );
     console.log("[cron] Тема объявлена");
-}
-
-async function withAIFallback<T>(
-    env: Env,
-    generate: (client: OpenAI, model: string) => Promise<T>,
-): Promise<T> {
-    const providers: Array<{
-        name: string;
-        client: OpenAI;
-        model: string;
-    }> = [];
-
-    if (env.GEMINI_API_KEY) {
-        providers.push({
-            name: "gemini",
-            client: new OpenAI({
-                apiKey: env.GEMINI_API_KEY,
-                baseURL:
-                    "https://generativelanguage.googleapis.com/v1beta/openai/",
-                timeout: 25_000,
-                maxRetries: 0,
-            }),
-            model: "gemini-3.5-flash-lite",
-        });
-    }
-
-    if (env.GROQ_API_KEY) {
-        providers.push({
-            name: "groq",
-            client: new OpenAI({
-                apiKey: env.GROQ_API_KEY,
-                baseURL: "https://api.groq.com/openai/v1",
-                timeout: 25_000,
-                maxRetries: 0,
-            }),
-            model: "openai/gpt-oss-20b",
-        });
-    }
-
-    if (providers.length === 0) {
-        throw new Error("Не настроены GEMINI_API_KEY и GROQ_API_KEY");
-    }
-
-    let lastError: unknown;
-
-    for (const provider of providers) {
-        try {
-            console.log(`[AI] Использую ${provider.name}`);
-
-            const result = await generate(provider.client, provider.model);
-
-            console.log(`[AI] Успешная генерация через ${provider.name}`);
-            return result;
-        } catch (err) {
-            lastError = err;
-
-            const error = err as {
-                status?: number;
-                code?: string;
-                message?: string;
-            };
-
-            const retryable =
-                [408, 409, 429, 500, 502, 503, 504].includes(
-                    error.status ?? 0,
-                ) ||
-                error.code === "ETIMEDOUT" ||
-                error.code === "ECONNRESET" ||
-                error.code === "ECONNREFUSED";
-
-            console.error(`[AI] ${provider.name} не сработал:`, err);
-
-            if (!retryable) {
-                throw err;
-            }
-
-            console.warn(`[AI] Ошибка временная, пробую следующего провайдера`);
-        }
-    }
-
-    throw lastError ?? new Error("Все AI-провайдеры недоступны");
 }

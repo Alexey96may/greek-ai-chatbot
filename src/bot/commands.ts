@@ -2,6 +2,7 @@ import type { Bot, Context } from "grammy";
 import type { Env } from "../types";
 import { isAllowedContext } from "../helpers/context";
 import { loadState, saveState } from "../state";
+import { createEveningPoll } from "../poll";
 
 type SendMessageExtra = Parameters<Context["reply"]>[1];
 
@@ -131,12 +132,10 @@ export function setupCommands(bot: Bot, env: Env) {
     bot.command("poll", async (ctx) => {
         if (!isAllowedContext(ctx, env)) return;
 
-        // Только owner может управлять
-        const isOwner =
-            ctx.chat?.type === "private" &&
-            ctx.chat.id === Number(env.OWNER_ID);
+        const isOwner = ctx.from?.id === Number(env.OWNER_ID);
+
         if (!isOwner) {
-            return ctx.reply("Эта команда только для создателя.");
+            return;
         }
 
         const arg = ctx.match?.trim().toLowerCase();
@@ -145,23 +144,46 @@ export function setupCommands(bot: Bot, env: Env) {
             const state = await loadState(env);
             state.pollEnabled = true;
             await saveState(env, state);
-            return ctx.reply("✅ Голосование за тему дня включено.");
+
+            return replyCommand(ctx, "✅ Голосование включено.");
         }
 
         if (arg === "off") {
             const state = await loadState(env);
             state.pollEnabled = false;
             await saveState(env, state);
-            return ctx.reply(
-                "⏸️ Голосование за тему дня выключено. Тема будет генерироваться автоматически.",
+
+            return replyCommand(
+                ctx,
+                "⏸️ Автоматическое голосование выключено.",
             );
         }
 
-        // Без аргумента — показать статус
+        if (arg === "now") {
+            try {
+                await createEveningPoll(bot, env);
+                return replyCommand(
+                    ctx,
+                    "✅ Проверка создания опроса завершена.",
+                );
+            } catch (error) {
+                console.error("[poll] Ручной запуск не удался:", error);
+
+                return replyCommand(
+                    ctx,
+                    "❌ Не удалось создать опрос. Проверь логи бота.",
+                );
+            }
+        }
+
         const state = await loadState(env);
-        return ctx.reply(
+
+        return replyCommand(
+            ctx,
             `📊 Голосование: ${state.pollEnabled ? "включено" : "выключено"}\n\n` +
-                `Управление: /poll on | /poll off`,
+                `/poll on — включить\n` +
+                `/poll off — выключить\n` +
+                `/poll now — создать опрос сейчас`,
         );
     });
 }
