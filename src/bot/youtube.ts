@@ -204,7 +204,11 @@ export function setupYouTubeHandler(bot: Bot, env: Env): void {
             return;
         }
 
-        const instruction = extractInstruction(text, url, bot.botInfo.username);
+        const instruction = extractInstruction(
+            text,
+            url,
+            bot.botInfo.username ?? "",
+        );
 
         const chatId = ctx.chat.id;
         const messageId = message.message_id;
