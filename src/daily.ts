@@ -3,15 +3,17 @@ import type { BotState, DailyWord } from "./state";
 import { saveState, todayString } from "./state";
 import type { Env } from "./types";
 import { BASE_DAILY_PROMPT } from "./prompts/daily";
-
-const FOCUS_CATEGORIES = [
-    "бытовые ситуации (транспорт, очередь, соседи, магазин)",
-    "гипотетические вопросы (что бы ты сделал, если...)",
-    "сравнения и выбор (что лучше: X или Y)",
-    "наблюдения за привычками и странностями людей",
-    "сезонные и локальные детали (праздники, погода, город)",
-    "лёгкие абсурдные или игровые темы",
-];
+import { buildPollPrompt } from "./prompts/poll";
+import {
+    dedupeExact,
+    filterUsableTopics,
+    pickFocusCategory,
+} from "./helpers/topics";
+import {
+    extractJsonArray,
+    invalidAIResponse,
+    stripMarkdownCodeFence,
+} from "./helpers/ai-json";
 
 function buildPrompt(state: BotState): string {
     const parts = [BASE_DAILY_PROMPT];
@@ -47,10 +49,7 @@ export async function generateDailyTopic(
     });
 
     const raw = response.choices[0]?.message?.content?.trim() ?? "";
-    const cleaned = raw
-        .replace(/^```json\s*/i, "")
-        .replace(/```$/, "")
-        .trim();
+    const cleaned = stripMarkdownCodeFence(raw);
 
     let parsed: unknown;
 
@@ -118,39 +117,8 @@ export async function generatePollTopics(
     count: number,
     recentTopics: string[],
 ): Promise<string[]> {
-    const focusCategory =
-        FOCUS_CATEGORIES[Math.floor(Math.random() * FOCUS_CATEGORIES.length)];
-
-    const recentList =
-        recentTopics.length > 0
-            ? `\n\nНЕ повторяй эти недавние темы:\n${recentTopics.map((t) => `- ${t}`).join("\n")}`
-            : "";
-
-    const prompt = `Придумай ровно ${count} разных тем для обсуждения на завтра в чате изучения греческого и русского.
-
-Требования:
-- Темы должны быть простыми, жизненными и интересными для обсуждения.
-- Каждая тема — ОДНО короткое предложение.
-- Формат: греческая фраза, затем перевод на русский в скобках.
-- ВАЖНО: весь вариант (греческий + перевод в скобках) — строго до 90 символов, иначе Telegram отклонит опрос.
-- Греческая фраза — максимум 4–5 слов.
-- Все темы должны быть разными.
-
-Разнообразие:
-- Старайся охватить разные углы: бытовые ситуации, гипотетические вопросы ("что бы ты сделал, если..."), сравнения/выбор ("что лучше: X или Y"), наблюдения за привычками людей, сезонные/локальные детали, лёгкие абсурдные или игровые темы.
-- В этот раз сделай акцент на категории: ${focusCategory}.
-- Не повторяй темы из списка ниже и не генерируй близкие по смыслу.
-
-
-Плохие примеры (не надо): темы только про еду, только про погоду, только про работу, общие вопросы вроде "Что ты любишь делать?".
-
-${recentList}
-
-Верни ТОЛЬКО валидный JSON-массив из ровно ${count} строк.
-Не добавляй markdown, пояснения или текст до и после массива.
-
-Пример:
-["Τι τρώτε συνήθως για πρωινό; (Что вы обычно едите на завтрак?)", "Πού σας αρέσει να ταξιδεύετε; (Куда вы любите путешествовать?)"]`;
+    const focusCategory = pickFocusCategory();
+    const prompt = buildPollPrompt(count, recentTopics, focusCategory);
 
     const response = await ai.chat.completions.create({
         model,
@@ -160,7 +128,25 @@ ${recentList}
     });
 
     const raw = response.choices[0]?.message?.content?.trim() ?? "";
+    const topics = parsePollTopics(raw);
+    const unique = dedupeExact(topics);
+    const usable = filterUsableTopics(unique, recentTopics);
 
+    console.log(
+        `[poll] raw=${topics.length} unique=${unique.length} filtered=${usable.length} count=${count} recent=${recentTopics.length} category=${focusCategory}`,
+    );
+
+    if (usable.length < count) {
+        throw invalidAIResponse(
+            `ИИ вернул ${usable.length} тем вместо ${count}`,
+            raw,
+        );
+    }
+
+    return usable;
+}
+
+function parsePollTopics(raw: string): string[] {
     let parsed: unknown;
 
     try {
@@ -168,7 +154,6 @@ ${recentList}
         parsed = JSON.parse(jsonArray);
     } catch {
         console.error("[AI] Не удалось распарсить темы для опроса:", {
-            model,
             raw: raw.slice(0, 2000),
         });
 
@@ -179,46 +164,10 @@ ${recentList}
         throw invalidAIResponse("ИИ вернул не массив тем", raw);
     }
 
-    const topics = parsed
+    return parsed
         .filter((item): item is string => typeof item === "string")
         .map((item) => item.trim())
         .filter(Boolean);
-
-    // Удаляем повторяющиеся темы без учёта регистра
-    const uniqueTopics = [
-        ...new Map(
-            topics.map((topic) => [topic.toLocaleLowerCase(), topic]),
-        ).values(),
-    ].slice(0, count);
-
-    // Отбрасываем темы, близкие по смыслу к недавним, и слишком длинные для Telegram
-    // Отбрасываем темы, близкие по смыслу к недавним, и невалидные по длине
-    const filteredTopics = uniqueTopics.filter((topic) => {
-        const len = [...topic].length;
-        const tooShort = len < 10;
-        const tooLong = len > 100;
-        const similar = recentTopics.some((recent) => isSimilar(topic, recent));
-
-        if (tooShort || tooLong || similar) {
-            const reason = tooShort ? "short" : tooLong ? "long" : "similar";
-            console.log(`[poll] dropped (${reason}): ${topic}`);
-        }
-
-        return !tooShort && !tooLong && !similar;
-    });
-
-    console.log(
-        `[poll] raw=${topics.length} unique=${uniqueTopics.length} filtered=${filteredTopics.length} count=${count} recent=${recentTopics.length} category=${focusCategory}`,
-    );
-
-    if (filteredTopics.length < count) {
-        throw invalidAIResponse(
-            `ИИ вернул ${filteredTopics.length} тем вместо ${count}`,
-            raw,
-        );
-    }
-
-    return filteredTopics;
 }
 
 export async function generateWordForTopic(
@@ -251,10 +200,7 @@ export async function generateWordForTopic(
     });
 
     const raw = response.choices[0]?.message?.content?.trim() ?? "";
-    const cleaned = raw
-        .replace(/^```json\s*/i, "")
-        .replace(/```$/, "")
-        .trim();
+    const cleaned = stripMarkdownCodeFence(raw);
 
     let parsed: unknown;
 
@@ -271,15 +217,6 @@ export async function generateWordForTopic(
     return parsed;
 }
 
-function invalidAIResponse(label: string, raw: string): Error {
-    const error = new Error(`${label}: ${raw.slice(0, 1500)}`) as Error & {
-        code: string;
-    };
-
-    error.code = "INVALID_AI_RESPONSE";
-    return error;
-}
-
 function isDailyWord(value: unknown): value is DailyWord {
     if (!value || typeof value !== "object") return false;
 
@@ -293,69 +230,4 @@ function isDailyWord(value: unknown): value is DailyWord {
         typeof word.example === "string" &&
         word.example.trim().length > 0
     );
-}
-
-function normalizeTopic(t: string): Set<string> {
-    return new Set(
-        t
-            .toLocaleLowerCase()
-            .replace(/[^\p{L}\p{N}\s]/gu, " ")
-            .split(/\s+/)
-            .filter((w) => w.length > 4),
-    );
-}
-
-function isSimilar(a: string, b: string): boolean {
-    const A = normalizeTopic(a);
-    const B = normalizeTopic(b);
-    if (A.size === 0 || B.size === 0) return false;
-    let overlap = 0;
-    for (const w of A) if (B.has(w)) overlap++;
-    return overlap / Math.min(A.size, B.size) >= 0.5;
-}
-
-function extractJsonArray(raw: string): string {
-    // Убираем Markdown-обёртку, если она есть
-    const cleaned = raw.replace(/```(?:json)?/gi, "").trim();
-
-    const start = cleaned.indexOf("[");
-
-    if (start === -1) {
-        throw new Error("JSON-массив не найден");
-    }
-
-    // Ищем конец массива, учитывая строки и экранированные кавычки
-    let depth = 0;
-    let inString = false;
-    let escaped = false;
-
-    for (let i = start; i < cleaned.length; i++) {
-        const char = cleaned[i];
-
-        if (inString) {
-            if (escaped) {
-                escaped = false;
-            } else if (char === "\\") {
-                escaped = true;
-            } else if (char === '"') {
-                inString = false;
-            }
-
-            continue;
-        }
-
-        if (char === '"') {
-            inString = true;
-        } else if (char === "[") {
-            depth++;
-        } else if (char === "]") {
-            depth--;
-
-            if (depth === 0) {
-                return cleaned.slice(start, i + 1);
-            }
-        }
-    }
-
-    throw new Error("JSON-массив не завершён");
 }
